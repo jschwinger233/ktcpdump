@@ -11,6 +11,7 @@
 #define MAX_TRACK_SIZE 10240
 
 const static u32 ZERO = 0;
+const static u8 TRUE = 1;
 
 struct event {
 	u64 at;
@@ -31,52 +32,74 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__type(key, u64);
-	__type(value, struct skb *);
+	__type(key, struct sk_buff *);
+	__type(value, u8);
 	__uint(max_entries, MAX_TRACK_SIZE);
-} stackid_skb SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__type(key, struct skb *);
-	__type(value, u64);
-	__uint(max_entries, MAX_TRACK_SIZE);
-} skb_stackid SEC(".maps");
+} alive_skbs SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1<<29);
 } event_ringbuf SEC(".maps");
 
-static __always_inline u64
-get_stackid(struct pt_regs *ctx)
+#define is_skb_on_reg(r) \
+	reg = BPF_CORE_READ(ctx, r); \
+	if (reg && bpf_map_lookup_elem(&alive_skbs, &reg)) \
+		return reg;
+
+static __always_inline u64 search_skb_from_register(struct pt_regs *ctx)
 {
-	u64 caller_fp;
-	u64 fp = PT_REGS_FP(ctx);
-	for (int depth = 0; depth < MAX_STACK_DEPTH; depth++) {
-		if (bpf_probe_read_kernel(&caller_fp, sizeof(caller_fp), (void *)fp) < 0)
-			break;
-
-		if (caller_fp == 0)
-			break;
-
-		fp = caller_fp;
-	}
-	return fp;
+	u64 reg = 0;
+	is_skb_on_reg(r15);
+	is_skb_on_reg(r14);
+	is_skb_on_reg(r13);
+	is_skb_on_reg(r12);
+	is_skb_on_reg(bp);
+	is_skb_on_reg(bx);
+	is_skb_on_reg(r11);
+	is_skb_on_reg(r10);
+	is_skb_on_reg(r9);
+	is_skb_on_reg(r8);
+	is_skb_on_reg(ax);
+	is_skb_on_reg(cx);
+	is_skb_on_reg(dx);
+	is_skb_on_reg(si);
+	is_skb_on_reg(di);
+	return 0;
 }
 
-/* kprobe_skb_by_stackid will be attached to all kprobe targets in -k. */
-SEC("kprobe/skb_by_stackid")
-int kprobe_skb_by_stackid(struct pt_regs *ctx) {
-	u64 stackid = get_stackid(ctx);
+static __always_inline u64 search_skb_from_stack(struct pt_regs *ctx)
+{
+	u64 sp = (u64)PT_REGS_SP(ctx);
 
-	struct sk_buff **pskb = bpf_map_lookup_elem(&stackid_skb, &stackid);
-	if (!pskb || !*pskb)
+	u64 maybe_skb;
+	for (int i = 0; i < MAX_STACK_DEPTH; i++) {
+		u64 addr = sp + i * sizeof(u64);
+		bpf_probe_read_kernel(&maybe_skb, sizeof(maybe_skb), (void *)addr);
+		if (bpf_map_lookup_elem(&alive_skbs, &maybe_skb))
+			return maybe_skb;
+	}
+
+	return 0;
+}
+
+/* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
+SEC("kprobe/skb_by_search")
+int kprobe_skb_by_search(struct pt_regs *ctx) {
+	struct sk_buff *skb;
+
+	skb = (struct sk_buff *)search_skb_from_register(ctx);
+	if (!skb) {
+		skb = (struct sk_buff *)search_skb_from_stack(ctx);
+		bpf_printk("skb from stack: %llx\n", skb);
+	} else {
+		bpf_printk("skb from register: %llx\n", skb);
+	}
+	if (!skb)
 		return BPF_OK;
-	struct sk_buff *skb = *pskb;
 
 	// TODO: pcap filter
-	if (BPF_CORE_READ(skb, mark) == 0)
+	if (BPF_CORE_READ(skb, mark) != 0x08000000)
 		return BPF_OK;
 
 	struct event *event = bpf_map_lookup_elem(&event_stash, &ZERO);
@@ -107,28 +130,15 @@ int kprobe_skb_by_stackid(struct pt_regs *ctx) {
 SEC("kretprobe/skb_build")
 int kretprobe_skb_build(struct pt_regs *ctx) {
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC(ctx);
-
-	u64 stackid = get_stackid(ctx);
-
-	bpf_map_update_elem(&stackid_skb, &stackid, &skb, BPF_ANY);
-	bpf_map_update_elem(&skb_stackid, &skb, &stackid, BPF_ANY);
+	bpf_map_update_elem(&alive_skbs, &skb, &TRUE, BPF_ANY);
 	return BPF_OK;
 }
 
 /* skb_free will be attached to kfree_skbmem. */
 SEC("kprobe/skb_free")
 int kprobe_skb_free(struct pt_regs *ctx) {
-	u64 stackid = get_stackid(ctx);
-
-	bpf_map_delete_elem(&stackid_skb, &stackid);
-
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_PARM1(ctx);
-	u64 skb_addr = (u64)skb;
-
-	u64 *pstackid = bpf_map_lookup_elem(&skb_stackid, &skb_addr);
-	if (pstackid)
-		bpf_map_delete_elem(&stackid_skb, pstackid);
-	bpf_map_delete_elem(&skb_stackid, &skb_addr);
+	bpf_map_delete_elem(&alive_skbs, &skb);
 
 	return BPF_OK;
 }

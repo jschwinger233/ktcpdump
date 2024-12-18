@@ -45,7 +45,7 @@ func main() {
 	}
 	defer k.Close()
 
-	k, err = link.Kprobe(os.Args[1], objs.KprobeSkbByStackid, nil)
+	k, err = link.Kprobe(os.Args[1], objs.KprobeSkbBySearch, nil)
 	if err != nil {
 		log.Fatalf("Failed to attach ip_rcv: %+v\n", err)
 	}

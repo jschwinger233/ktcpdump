@@ -63,19 +63,18 @@ type BpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfProgramSpecs struct {
-	KprobeSkbByStackid *ebpf.ProgramSpec `ebpf:"kprobe_skb_by_stackid"`
-	KprobeSkbFree      *ebpf.ProgramSpec `ebpf:"kprobe_skb_free"`
-	KretprobeSkbBuild  *ebpf.ProgramSpec `ebpf:"kretprobe_skb_build"`
+	KprobeSkbBySearch *ebpf.ProgramSpec `ebpf:"kprobe_skb_by_search"`
+	KprobeSkbFree     *ebpf.ProgramSpec `ebpf:"kprobe_skb_free"`
+	KretprobeSkbBuild *ebpf.ProgramSpec `ebpf:"kretprobe_skb_build"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
+	AliveSkbs    *ebpf.MapSpec `ebpf:"alive_skbs"`
 	EventRingbuf *ebpf.MapSpec `ebpf:"event_ringbuf"`
 	EventStash   *ebpf.MapSpec `ebpf:"event_stash"`
-	SkbStackid   *ebpf.MapSpec `ebpf:"skb_stackid"`
-	StackidSkb   *ebpf.MapSpec `ebpf:"stackid_skb"`
 }
 
 // BpfObjects contains all objects after they have been loaded into the kernel.
@@ -97,18 +96,16 @@ func (o *BpfObjects) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
+	AliveSkbs    *ebpf.Map `ebpf:"alive_skbs"`
 	EventRingbuf *ebpf.Map `ebpf:"event_ringbuf"`
 	EventStash   *ebpf.Map `ebpf:"event_stash"`
-	SkbStackid   *ebpf.Map `ebpf:"skb_stackid"`
-	StackidSkb   *ebpf.Map `ebpf:"stackid_skb"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
+		m.AliveSkbs,
 		m.EventRingbuf,
 		m.EventStash,
-		m.SkbStackid,
-		m.StackidSkb,
 	)
 }
 
@@ -116,14 +113,14 @@ func (m *BpfMaps) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfPrograms struct {
-	KprobeSkbByStackid *ebpf.Program `ebpf:"kprobe_skb_by_stackid"`
-	KprobeSkbFree      *ebpf.Program `ebpf:"kprobe_skb_free"`
-	KretprobeSkbBuild  *ebpf.Program `ebpf:"kretprobe_skb_build"`
+	KprobeSkbBySearch *ebpf.Program `ebpf:"kprobe_skb_by_search"`
+	KprobeSkbFree     *ebpf.Program `ebpf:"kprobe_skb_free"`
+	KretprobeSkbBuild *ebpf.Program `ebpf:"kretprobe_skb_build"`
 }
 
 func (p *BpfPrograms) Close() error {
 	return _BpfClose(
-		p.KprobeSkbByStackid,
+		p.KprobeSkbBySearch,
 		p.KprobeSkbFree,
 		p.KretprobeSkbBuild,
 	)
