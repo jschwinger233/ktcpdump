@@ -10,11 +10,16 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/elastic/go-sysinfo"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/jschwinger233/elibpcap"
 	"github.com/jschwinger233/ktcpdump/bpf"
 )
@@ -138,6 +143,25 @@ func main() {
 		<-ctx.Done()
 		eventsReader.Close()
 	}()
+
+	host, err := sysinfo.Host()
+	if err != nil {
+		log.Fatalf("Failed to get host info: %s\n", err)
+	}
+	bootTime := host.Info().BootTime
+
+	f, err := os.Create("a.pcap")
+	if err != nil {
+		log.Fatalf("Failed to create pcap file: %s\n", err)
+	}
+	defer f.Close()
+
+	pcapw := pcapgo.NewWriter(f)
+	linktype := layers.LinkTypeEthernet
+	if err = pcapw.WriteFileHeader(1600, linktype); err != nil {
+		log.Fatalf("Failed to write pcap file header: %s\n", err)
+	}
+
 	println("tracing")
 	for {
 		rec, err := eventsReader.Read()
@@ -156,5 +180,15 @@ func main() {
 		}
 
 		fmt.Printf("skb=%x len=%d\n", event.Skb, event.DataLen)
+
+		captureInfo := gopacket.CaptureInfo{
+			Timestamp:     bootTime.Add(time.Duration(event.Ts)),
+			CaptureLength: int(event.DataLen),
+			Length:        int(event.DataLen),
+		}
+		if err = pcapw.WritePacket(captureInfo, event.Data[:event.DataLen]); err != nil {
+			log.Printf("failed to write packet: %v", err)
+		}
+
 	}
 }
