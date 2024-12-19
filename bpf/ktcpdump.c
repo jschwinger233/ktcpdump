@@ -7,7 +7,7 @@
 #include "bpf/bpf_core_read.h"
 
 #define MAX_STACK_DEPTH 50
-#define MAX_DATA_SIZE 1500
+#define MAX_DATA_SIZE 9000
 #define MAX_TRACK_SIZE 10240
 
 const static u32 ZERO = 0;
@@ -20,7 +20,6 @@ struct event {
 	u32 data_len;
 	u8 has_mac: 1;
 	u8 unused: 7;
-	u8 data[MAX_DATA_SIZE];
 };
 
 struct {
@@ -29,6 +28,17 @@ struct {
 	__type(value, struct event);
 	__uint(max_entries, 1);
 } event_stash SEC(".maps");
+
+struct skb_data {
+	u8 data[MAX_DATA_SIZE];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__type(key, u32);
+	__type(value, struct skb_data);
+	__uint(max_entries, 1);
+} skb_data_stash SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -41,6 +51,11 @@ struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1<<29);
 } event_ringbuf SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 1<<29);
+} skb_data_ringbuf SEC(".maps");
 
 #define is_skb_on_reg(r) \
 	reg = BPF_CORE_READ(ctx, r); \
@@ -148,9 +163,15 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	u32 data_len = event->data_len > MAX_DATA_SIZE
 		? MAX_DATA_SIZE
 		: event->data_len;
-	bpf_probe_read_kernel(&event->data, data_len, (void *)(skb_head + off_l2_or_l3));
+
+	struct skb_data *skb_data = bpf_map_lookup_elem(&skb_data_stash, &ZERO);
+	if (!skb_data)
+		return BPF_OK;
+
+	bpf_probe_read_kernel(&skb_data->data, data_len, (void *)(skb_head + off_l2_or_l3));
 
 	bpf_ringbuf_output(&event_ringbuf, event, sizeof(*event), 0);
+	bpf_ringbuf_output(&event_ringbuf, &skb_data->data, data_len, 0);
 	return BPF_OK;
 }
 

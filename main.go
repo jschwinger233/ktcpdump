@@ -181,12 +181,26 @@ func main() {
 
 		fmt.Printf("skb=%x len=%d\n", event.Skb, event.DataLen)
 
+		rec, err = eventsReader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				return
+			}
+			log.Printf("failed to read ringbuf: %+v", err)
+			continue
+		}
+		skbData := make([]byte, event.DataLen)
+		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &skbData); err != nil {
+			log.Printf("failed to parse ringbuf skbdata: %v", err)
+			continue
+		}
+
 		captureInfo := gopacket.CaptureInfo{
 			Timestamp:     bootTime.Add(time.Duration(event.Ts)),
 			CaptureLength: int(event.DataLen),
 			Length:        int(event.DataLen),
 		}
-		if err = pcapw.WritePacket(captureInfo, event.Data[:event.DataLen]); err != nil {
+		if err = pcapw.WritePacket(captureInfo, skbData[:]); err != nil {
 			log.Printf("failed to write packet: %v", err)
 		}
 
