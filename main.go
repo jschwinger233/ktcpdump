@@ -9,18 +9,58 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/jschwinger233/elibpcap"
 	"github.com/jschwinger233/ktcpdump/bpf"
 )
 
 func main() {
+	filter := "host 1.1.1.1 and tcp[tcpflags]&tcp-syn!=0"
 	spec, err := bpf.LoadBpf()
 	if err != nil {
 		log.Fatalf("Failed to load BPF: %s\n", err)
+	}
+
+	prog, ok := spec.Programs["kprobe_skb_by_search"]
+	if !ok {
+		log.Fatalf("Failed to find kprobe_skb_by_search\n")
+	}
+	if prog.Instructions, err = elibpcap.Inject(
+		filter,
+		prog.Instructions,
+		elibpcap.Options{
+			AtBpf2Bpf:  "kprobe_pcap_filter_l2",
+			DirectRead: false,
+			L2Skb:      true,
+		},
+	); err != nil {
+		log.Fatalf("Failed to inject kprobe_pcap_filter_l2: %s\n", err)
+	}
+	if prog.Instructions, err = elibpcap.Inject(
+		filter,
+		prog.Instructions,
+		elibpcap.Options{
+			AtBpf2Bpf:  "kprobe_pcap_filter_l3",
+			DirectRead: false,
+			L2Skb:      false,
+		},
+	); err != nil && strings.Contains(fmt.Sprintf("%+v", err), "expression rejects all packets") {
+		if prog.Instructions, err = elibpcap.Inject(
+			"__reject_all__",
+			prog.Instructions,
+			elibpcap.Options{
+				AtBpf2Bpf:  "kprobe_pcap_filter_l3",
+				DirectRead: false,
+				L2Skb:      false,
+			},
+		); err != nil {
+			log.Fatalf("Failed to inject kprobe_pcap_filter_l3: %s\n", err)
+		}
 	}
 
 	var opts ebpf.CollectionOptions

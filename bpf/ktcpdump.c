@@ -83,6 +83,35 @@ static __always_inline u64 search_skb_from_stack(struct pt_regs *ctx)
 	return 0;
 }
 
+static __noinline bool
+kprobe_pcap_filter_l3(void *_skb, void *__skb, void *___skb, void *data, void* data_end)
+{
+	return data != data_end && _skb == __skb && __skb == ___skb;
+}
+
+static __noinline bool
+kprobe_pcap_filter_l2(void *_skb, void *__skb, void *___skb, void *data, void* data_end)
+{
+	return data != data_end && _skb == __skb && __skb == ___skb;
+}
+
+static __always_inline bool
+kprobe_pcap_filter(struct sk_buff *skb)
+{
+	void *skb_head = BPF_CORE_READ(skb, head);
+	void *data_end = skb_head + BPF_CORE_READ(skb, tail);
+
+	if (BPF_CORE_READ(skb, mac_len) == 0) {
+		void *data = skb_head + BPF_CORE_READ(skb, network_header);
+		return kprobe_pcap_filter_l3((void *)skb, (void *)skb, (void *)skb,
+					     data, data_end);
+	}
+
+	void *data = skb_head + BPF_CORE_READ(skb, mac_header);
+	return kprobe_pcap_filter_l2((void *)skb, (void *)skb, (void *)skb,
+				     data, data_end);
+}
+
 /* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
 SEC("kprobe/skb_by_search")
 int kprobe_skb_by_search(struct pt_regs *ctx) {
@@ -98,8 +127,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	if (!skb)
 		return BPF_OK;
 
-	// TODO: pcap filter
-	if (BPF_CORE_READ(skb, mark) != 0x08000000)
+	if (!kprobe_pcap_filter(skb))
 		return BPF_OK;
 
 	struct event *event = bpf_map_lookup_elem(&event_stash, &ZERO);
