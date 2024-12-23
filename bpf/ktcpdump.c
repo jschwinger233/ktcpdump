@@ -18,8 +18,8 @@ struct event {
 	u64 ts;
 	u64 skb;
 	u32 data_len;
-	u8 has_mac: 1;
-	u8 unused: 7;
+	u16 protocol;
+	u8 has_mac;
 };
 
 struct {
@@ -128,7 +128,7 @@ kprobe_pcap_filter(struct sk_buff *skb)
 }
 
 /* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
-SEC("kprobe/skb_by_search")
+SEC("kprobe.multi/skb_by_search")
 int kprobe_skb_by_search(struct pt_regs *ctx) {
 	struct sk_buff *skb;
 
@@ -152,7 +152,8 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	event->at = PT_REGS_FP(ctx);
 	event->ts = bpf_ktime_get_boot_ns();
 	event->skb = (u64)skb;
-	event->has_mac = BPF_CORE_READ(skb, mac_len) ? true : false;
+	event->protocol = BPF_CORE_READ(skb, protocol);
+	event->has_mac = BPF_CORE_READ(skb, dev, hard_header_len) ? 1 : 0;
 
 	u16 off_l2_or_l3 = event->has_mac
 		? BPF_CORE_READ(skb, mac_header)
@@ -176,7 +177,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 }
 
 /* kretprobe_skb will be attached to all kretprobe targets with skb retval */
-SEC("kretprobe/skb_build")
+SEC("kretprobe.multi/skb_build")
 int kretprobe_skb_build(struct pt_regs *ctx) {
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC(ctx);
 	bpf_map_update_elem(&alive_skbs, &skb, &TRUE, BPF_ANY);

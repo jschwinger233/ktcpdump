@@ -89,15 +89,21 @@ func main() {
 	}
 	defer k.Close()
 
+	targetAddrs := make([]uintptr, 0, len(config.Targets))
 	for _, target := range config.Targets {
-		k, err = link.Kprobe(target, objs.KprobeSkbBySearch, nil)
-		if err != nil {
-			log.Fatalf("Failed to attach ip_rcv: %+v\n", err)
+		addr := Kaddr(target, false, true)
+		if addr == 0 {
+			log.Fatalf("Symbol not found for -t: %s\n", target)
 		}
-		defer k.Close()
+		targetAddrs = append(targetAddrs, uintptr(addr))
 	}
+	k, err = link.KprobeMulti(objs.KprobeSkbBySearch, link.KprobeMultiOptions{Addresses: targetAddrs})
+	if err != nil {
+		log.Fatalf("Failed to attach targets (-t): %+v\n", err)
+	}
+	defer k.Close()
 
-	targets := []string{}
+	skbBuildFuncs := []string{}
 	btfSpec, err := btf.LoadKernelSpec()
 	if err != nil {
 		log.Fatalf("Failed to load kernel BTF: %+v\n", err)
@@ -113,23 +119,26 @@ func main() {
 		if ptr, ok := fnProto.Return.(*btf.Pointer); ok {
 			if strct, ok := ptr.Target.(*btf.Struct); ok {
 				if strct.Name == "sk_buff" {
-					targets = append(targets, fn.Name)
+					skbBuildFuncs = append(skbBuildFuncs, fn.Name)
 					continue
 				}
 			}
 		}
 	}
-	for _, target := range targets {
-		kr, err := link.Kretprobe(target, objs.KretprobeSkbBuild, nil)
-		if err != nil {
-			// skip if not exist
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			log.Fatalf("Failed to attach %s: %+v\n", target, err)
+	skbBuildAddrs := make([]uintptr, 0, len(skbBuildFuncs))
+	for _, skbBuildFunc := range skbBuildFuncs {
+		addr := Kaddr(skbBuildFunc, true, true)
+		if addr == 0 {
+			println("Symbol not found for skb build:", skbBuildFunc)
+			continue
 		}
-		defer kr.Close()
+		skbBuildAddrs = append(skbBuildAddrs, uintptr(addr))
 	}
+	kr, err := link.KretprobeMulti(objs.KretprobeSkbBuild, link.KprobeMultiOptions{Addresses: skbBuildAddrs})
+	if err != nil {
+		log.Fatalf("Failed to attach skb build funcs: %+v\n", err)
+	}
+	defer kr.Close()
 
 	eventsReader, err := ringbuf.NewReader(objs.EventRingbuf)
 	if err != nil {
@@ -180,7 +189,7 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("skb=%x len=%d\n", event.Skb, event.DataLen)
+		fmt.Printf("skb=%x len=%d has_mac=%d\n", event.Skb, event.DataLen, event.HasMac)
 
 		rec, err = eventsReader.Read()
 		if err != nil {
@@ -201,7 +210,19 @@ func main() {
 			CaptureLength: int(event.DataLen),
 			Length:        int(event.DataLen),
 		}
-		if err = pcapw.WritePacket(captureInfo, skbData[:]); err != nil {
+		payload := []byte{}
+
+		if event.HasMac == 0 {
+			for i := 0; i < 12; i++ {
+				payload = append(payload, 0)
+			}
+			ethertype := make([]byte, 2)
+			binary.BigEndian.PutUint16(ethertype, uint16(event.Protocol))
+			payload = append(payload, ethertype[1], ethertype[0])
+
+		}
+		payload = append(payload, skbData...)
+		if err = pcapw.WritePacket(captureInfo, payload); err != nil {
 			log.Printf("failed to write packet: %v", err)
 		}
 

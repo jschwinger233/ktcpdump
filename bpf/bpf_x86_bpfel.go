@@ -13,11 +13,13 @@ import (
 )
 
 type BpfEvent struct {
-	At      uint64
-	Ts      uint64
-	Skb     uint64
-	DataLen uint32
-	_       [4]byte
+	At       uint64
+	Ts       uint64
+	Skb      uint64
+	DataLen  uint32
+	Protocol uint16
+	HasMac   uint8
+	_        [1]byte
 }
 
 type BpfSkbData struct{ Data [9000]uint8 }
