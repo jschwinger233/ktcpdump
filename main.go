@@ -25,7 +25,6 @@ import (
 )
 
 func main() {
-	filter := "host 1.1.1.1 and tcp[tcpflags]&tcp-syn!=0"
 	spec, err := bpf.LoadBpf()
 	if err != nil {
 		log.Fatalf("Failed to load BPF: %s\n", err)
@@ -36,7 +35,7 @@ func main() {
 		log.Fatalf("Failed to find kprobe_skb_by_search\n")
 	}
 	if prog.Instructions, err = elibpcap.Inject(
-		filter,
+		config.Pcapfilter,
 		prog.Instructions,
 		elibpcap.Options{
 			AtBpf2Bpf:  "kprobe_pcap_filter_l2",
@@ -47,7 +46,7 @@ func main() {
 		log.Fatalf("Failed to inject kprobe_pcap_filter_l2: %s\n", err)
 	}
 	if prog.Instructions, err = elibpcap.Inject(
-		filter,
+		config.Pcapfilter,
 		prog.Instructions,
 		elibpcap.Options{
 			AtBpf2Bpf:  "kprobe_pcap_filter_l3",
@@ -90,11 +89,13 @@ func main() {
 	}
 	defer k.Close()
 
-	k, err = link.Kprobe(os.Args[1], objs.KprobeSkbBySearch, nil)
-	if err != nil {
-		log.Fatalf("Failed to attach ip_rcv: %+v\n", err)
+	for _, target := range config.Targets {
+		k, err = link.Kprobe(target, objs.KprobeSkbBySearch, nil)
+		if err != nil {
+			log.Fatalf("Failed to attach ip_rcv: %+v\n", err)
+		}
+		defer k.Close()
 	}
-	defer k.Close()
 
 	targets := []string{}
 	btfSpec, err := btf.LoadKernelSpec()
@@ -150,7 +151,7 @@ func main() {
 	}
 	bootTime := host.Info().BootTime
 
-	f, err := os.Create("a.pcap")
+	f, err := os.Create(config.PcapFilename)
 	if err != nil {
 		log.Fatalf("Failed to create pcap file: %s\n", err)
 	}
