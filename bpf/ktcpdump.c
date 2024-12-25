@@ -129,7 +129,7 @@ kprobe_pcap_filter(struct sk_buff *skb)
 }
 
 /* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
-SEC("kprobe.multi/skb_by_search")
+SEC("kprobe/skb_by_search")
 int kprobe_skb_by_search(struct pt_regs *ctx) {
 	struct sk_buff *skb;
 

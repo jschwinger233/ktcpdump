@@ -82,7 +82,7 @@ func Kaddr(sym string, maybeSuffix bool, checkAvailability bool) (addr uint64) {
 		return addr
 	}
 	if maybeSuffix {
-		possibleSuffixes := []string{".cold", ".constprop.0", ".isra"}
+		possibleSuffixes := []string{".cold", ".constprop.0", ".isra.0"}
 		for _, suffix := range possibleSuffixes {
 			if addr := kallsymsByName[sym+suffix].Addr; addr != 0 {
 				sym = sym + suffix

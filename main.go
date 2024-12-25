@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,12 @@ import (
 	"github.com/jschwinger233/elibpcap"
 	"github.com/jschwinger233/ktcpdump/bpf"
 )
+
+var targetPattern *regexp.Regexp
+
+func init() {
+	targetPattern = regexp.MustCompile(`(?P<sym>[^+]*)(?:\+(?P<addr>\w+))?`)
+}
 
 func main() {
 	spec, err := bpf.LoadBpf()
@@ -89,19 +97,59 @@ func main() {
 	}
 	defer k.Close()
 
-	targetAddrs := make([]uintptr, 0, len(config.Targets))
 	for _, target := range config.Targets {
-		addr := Kaddr(target, false, true)
-		if addr == 0 {
-			log.Fatalf("Symbol not found for -t: %s\n", target)
+		println(target)
+		match := targetPattern.FindStringSubmatch(target)
+		result := make(map[string]string)
+		for i, name := range targetPattern.SubexpNames() {
+			if i != 0 && name != "" {
+				result[name] = match[i]
+			}
 		}
-		targetAddrs = append(targetAddrs, uintptr(addr))
+		if result["sym"] != "" {
+			_, isDigit := strconv.Atoi(result["sym"])
+			if strings.HasPrefix(result["sym"], "0x") || isDigit == nil {
+				result["addr"] = result["sym"]
+				delete(result, "sym")
+			}
+		}
+
+		var address uint64
+		var err error
+		if result["addr"] != "" {
+			if strings.HasPrefix(result["addr"], "0x") {
+				address, err = strconv.ParseUint(result["addr"][2:], 16, 64)
+			} else {
+				address, err = strconv.ParseUint(result["addr"], 10, 64)
+			}
+			if err != nil {
+				log.Fatalf("Invalid address: %s\n", result["addr"])
+			}
+		}
+
+		var symbol string
+		var offset uint64
+		if result["sym"] == "" && address == 0 {
+			log.Fatalf("Invalid target: %s\n", target)
+		} else if result["sym"] == "" && address != 0 {
+			sym, off := NearestSymbol(address)
+			symbol = sym.Name
+			offset = off
+		} else if result["sym"] != "" && address == 0 {
+			symbol = result["sym"]
+			offset = 0
+		} else {
+			symbol = result["sym"]
+			offset = address
+		}
+		println("symbol:", symbol, "offset:", offset)
+
+		k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
+		if err != nil {
+			log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
+		}
+		defer k.Close()
 	}
-	k, err = link.KprobeMulti(objs.KprobeSkbBySearch, link.KprobeMultiOptions{Addresses: targetAddrs})
-	if err != nil {
-		log.Fatalf("Failed to attach targets (-t): %+v\n", err)
-	}
-	defer k.Close()
 
 	skbBuildFuncs := []string{}
 	btfSpec, err := btf.LoadKernelSpec()
@@ -172,7 +220,7 @@ func main() {
 		log.Fatalf("Failed to write pcap file header: %s\n", err)
 	}
 
-	fmt.Printf("%-4s %-18s %-10s %s\n", "no", "skb", "skb->len", "location")
+	fmt.Printf("%-4s %-18s %-10s %-18s %s\n", "no", "skb", "skb->len", "pc", "location")
 	i := 0
 	for {
 		i++
@@ -192,7 +240,7 @@ func main() {
 		}
 
 		sym, off := NearestSymbol(event.At)
-		fmt.Printf("%-4d %-18x %-10d %s+%d\n", i, event.Skb, event.SkbLen, sym.Name, off)
+		fmt.Printf("%-4d %-18x %-10d %-18x %s+%d\n", i, event.Skb, event.SkbLen, event.At, sym.Name, off)
 
 		rec, err = eventsReader.Read()
 		if err != nil {
