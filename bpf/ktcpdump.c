@@ -17,6 +17,7 @@ struct event {
 	u64 at;
 	u64 ts;
 	u64 skb;
+	u32 skb_len;
 	u32 data_len;
 	u16 protocol;
 	u8 has_mac;
@@ -135,7 +136,8 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	skb = (struct sk_buff *)search_skb_from_register(ctx);
 	if (!skb) {
 		skb = (struct sk_buff *)search_skb_from_stack(ctx);
-		bpf_printk("skb from stack: %llx\n", skb);
+		if (skb)
+			bpf_printk("skb from stack: %llx\n", skb);
 	} else {
 		bpf_printk("skb from register: %llx\n", skb);
 	}
@@ -152,6 +154,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	event->at = PT_REGS_FP(ctx);
 	event->ts = bpf_ktime_get_boot_ns();
 	event->skb = (u64)skb;
+	event->skb_len = BPF_CORE_READ(skb, len);
 	event->protocol = BPF_CORE_READ(skb, protocol);
 	event->has_mac = BPF_CORE_READ(skb, dev, hard_header_len) ? 1 : 0;
 

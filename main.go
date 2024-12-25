@@ -189,7 +189,7 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("skb=%x len=%d has_mac=%d\n", event.Skb, event.DataLen, event.HasMac)
+		fmt.Printf("skb=%x len=%d datalen=%d has_mac=%d\n", event.Skb, event.SkbLen, event.DataLen, event.HasMac)
 
 		rec, err = eventsReader.Read()
 		if err != nil {
