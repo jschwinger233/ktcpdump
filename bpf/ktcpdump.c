@@ -151,7 +151,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 	if (!event)
 		return BPF_OK;
 
-	event->at = PT_REGS_FP(ctx);
+	event->at = PT_REGS_IP(ctx);
 	event->ts = bpf_ktime_get_boot_ns();
 	event->skb = (u64)skb;
 	event->skb_len = BPF_CORE_READ(skb, len);

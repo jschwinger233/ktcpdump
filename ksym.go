@@ -55,18 +55,18 @@ func RefreshKallsyms() {
 	readKallsyms()
 }
 
-func NearestSymbol(addr uint64) Symbol {
+func NearestSymbol(addr uint64) (Symbol, uint64) {
 	idx, _ := slices.BinarySearchFunc(kallsyms, addr, func(x Symbol, addr uint64) int { return int(x.Addr - addr) })
 	if idx == len(kallsyms) {
-		return kallsyms[idx-1]
+		return kallsyms[idx-1], 0
 	}
 	if kallsyms[idx].Addr == addr {
-		return kallsyms[idx]
+		return kallsyms[idx], 0
 	}
 	if idx == 0 {
-		return kallsyms[0]
+		return kallsyms[0], 0
 	}
-	return kallsyms[idx-1]
+	return kallsyms[idx-1], addr - kallsyms[idx-1].Addr
 }
 
 func Kaddr(sym string, maybeSuffix bool, checkAvailability bool) (addr uint64) {

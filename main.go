@@ -172,8 +172,10 @@ func main() {
 		log.Fatalf("Failed to write pcap file header: %s\n", err)
 	}
 
-	println("tracing")
+	fmt.Printf("%-4s %-18s %-10s %s\n", "no", "skb", "skb->len", "location")
+	i := 0
 	for {
+		i++
 		rec, err := eventsReader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
@@ -189,7 +191,8 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("skb=%x len=%d datalen=%d has_mac=%d\n", event.Skb, event.SkbLen, event.DataLen, event.HasMac)
+		sym, off := NearestSymbol(event.At)
+		fmt.Printf("%-4d %-18x %-10d %s+%d\n", i, event.Skb, event.SkbLen, sym.Name, off)
 
 		rec, err = eventsReader.Read()
 		if err != nil {
