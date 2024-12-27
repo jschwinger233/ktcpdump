@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	// TODO: slog
 	"log"
 	"os"
 	"os/signal"
@@ -29,7 +31,7 @@ import (
 var targetPattern *regexp.Regexp
 
 func init() {
-	targetPattern = regexp.MustCompile(`(?P<sym>[^+]*)(?:\+(?P<addr>\w+))?`)
+	targetPattern = regexp.MustCompile(`(?P<sym>[^+]*)(?:\+(?P<addr>.+))?`)
 }
 
 func main() {
@@ -98,7 +100,6 @@ func main() {
 	defer k.Close()
 
 	for _, target := range config.Targets {
-		println(target)
 		match := targetPattern.FindStringSubmatch(target)
 		result := make(map[string]string)
 		for i, name := range targetPattern.SubexpNames() {
@@ -106,9 +107,10 @@ func main() {
 				result[name] = match[i]
 			}
 		}
-		if result["sym"] != "" {
-			_, isDigit := strconv.Atoi(result["sym"])
-			if strings.HasPrefix(result["sym"], "0x") || isDigit == nil {
+		if result["sym"] != "" && result["addr"] == "" {
+			_, err := strconv.Atoi(result["sym"])
+			isDigit := err == nil
+			if strings.HasPrefix(result["sym"], "0x") || isDigit {
 				result["addr"] = result["sym"]
 				delete(result, "sym")
 			}
@@ -116,6 +118,11 @@ func main() {
 
 		var address uint64
 		var err error
+		var attachJumps bool
+		if result["addr"] == "*" {
+			attachJumps = true
+			delete(result, "addr")
+		}
 		if result["addr"] != "" {
 			if strings.HasPrefix(result["addr"], "0x") {
 				address, err = strconv.ParseUint(result["addr"][2:], 16, 64)
@@ -132,9 +139,9 @@ func main() {
 		if result["sym"] == "" && address == 0 {
 			log.Fatalf("Invalid target: %s\n", target)
 		} else if result["sym"] == "" && address != 0 {
-			sym, off := NearestSymbol(address)
+			sym, _ := NearestSymbol(address)
 			symbol = sym.Name
-			offset = off
+			offset = sym.Addr - address
 		} else if result["sym"] != "" && address == 0 {
 			symbol = result["sym"]
 			offset = 0
@@ -142,13 +149,29 @@ func main() {
 			symbol = result["sym"]
 			offset = address
 		}
-		println("symbol:", symbol, "offset:", offset)
+		if attachJumps {
+			jumps, err := FindJumps(symbol)
+			if err != nil {
+				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
+			}
+			for _, jump := range jumps {
+				println("symbol:", symbol, "offset:", jump)
+				k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: jump})
+				if err != nil {
+					log.Fatalf("Failed to attach targets %s+%d: %+v\n", symbol, jump, err)
+				}
+				defer k.Close()
+			}
+		} else {
+			// TODO: --verbose
+			println("symbol:", symbol, "offset:", offset)
 
-		k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
-		if err != nil {
-			log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
+			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
+			if err != nil {
+				log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
+			}
+			defer k.Close()
 		}
-		defer k.Close()
 	}
 
 	skbBuildFuncs := []string{}
@@ -177,6 +200,7 @@ func main() {
 	for _, skbBuildFunc := range skbBuildFuncs {
 		addr := Kaddr(skbBuildFunc, true, true)
 		if addr == 0 {
+			// TODO: fallback to kprobe
 			println("Symbol not found for skb build:", skbBuildFunc)
 			continue
 		}
@@ -239,8 +263,8 @@ func main() {
 			continue
 		}
 
-		sym, off := NearestSymbol(event.At)
-		fmt.Printf("%-4d %-18x %-10d %-18x %s+%d\n", i, event.Skb, event.SkbLen, event.At, sym.Name, off)
+		sym, _ := NearestSymbol(event.At)
+		fmt.Printf("%-4d %-18x %-10d %-18x %s+%d\n", i, event.Skb, event.SkbLen, event.At, sym.Name, event.At-sym.Addr)
 
 		rec, err = eventsReader.Read()
 		if err != nil {
