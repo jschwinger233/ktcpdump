@@ -99,6 +99,8 @@ func main() {
 	}
 	defer k.Close()
 
+	asms := map[uint64]string{}
+
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)
 		result := make(map[string]string)
@@ -149,13 +151,20 @@ func main() {
 			symbol = result["sym"]
 			offset = address
 		}
+
+		a := Kaddr(symbol, false, false)
 		if attachJumps {
 			jumps, err := FindJumps(symbol)
 			if err != nil {
 				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
 			}
 			for _, jump := range jumps {
+
 				println("symbol:", symbol, "offset:", jump)
+				if _, ok := asms[a+jump]; ok {
+					continue
+				}
+				asms[a+jump] = getAsm(a + jump)
 				k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: jump})
 				if err != nil {
 					log.Fatalf("Failed to attach targets %s+%d: %+v\n", symbol, jump, err)
@@ -166,6 +175,7 @@ func main() {
 			// TODO: --verbose
 			println("symbol:", symbol, "offset:", offset)
 
+			asms[a+offset] = getAsm(a + offset)
 			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
 			if err != nil {
 				log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
@@ -244,8 +254,9 @@ func main() {
 		log.Fatalf("Failed to write pcap file header: %s\n", err)
 	}
 
-	fmt.Printf("%-4s %-18s %-10s %-18s %s\n", "no", "skb", "skb->len", "pc", "location")
+	fmt.Printf("%-4s %-18s %-10s %-18s %-16s %s\n", "no", "skb", "skb->len", "pc", "location", "asm")
 	i := 0
+
 	for {
 		i++
 		rec, err := eventsReader.Read()
@@ -264,7 +275,11 @@ func main() {
 		}
 
 		sym, _ := NearestSymbol(event.At)
-		fmt.Printf("%-4d %-18x %-10d %-18x %s+%d\n", i, event.Skb, event.SkbLen, event.At, sym.Name, event.At-sym.Addr)
+		asm := asms[event.At-1]
+		if asm == "" {
+			asm = asms[event.At-4]
+		}
+		fmt.Printf("%-4d %-18x %-10d %-18x %-16s %s\n", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr), asm)
 
 		rec, err = eventsReader.Read()
 		if err != nil {

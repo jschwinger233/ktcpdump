@@ -78,3 +78,43 @@ func FindJumps(symbol string) (jumps []uint64, err error) {
 
 	return
 }
+
+func getAsm(addr uint64) string {
+	kcoreOnce.Do(parseKCore)
+
+	for _, prog := range kcoreElf.Progs {
+		if prog.Vaddr <= addr && prog.Vaddr+prog.Memsz >= addr {
+			bytes := make([]byte, 64)
+			if _, err := kcore.ReadAt(bytes, int64(prog.Off+addr-prog.Vaddr)); err != nil {
+				log.Fatalf("failed to read kcore %v", err)
+			}
+			if len(bytes) == 0 {
+				log.Fatalf("failed to read kcore")
+			}
+			inst, err := x86asm.Decode(bytes, 64)
+			if err != nil {
+				log.Fatalf("failed to decode: %s", err)
+			}
+			if inst.Op == x86asm.CALL {
+				for _, arg := range inst.Args {
+					if arg == nil {
+						break
+					}
+					rel, ok := arg.(x86asm.Rel)
+					if !ok {
+						break
+					}
+					callees := addr + uint64(rel) + uint64(inst.Len)
+					return fmt.Sprintf("call %s", Ksym(callees))
+				}
+			} else {
+				return inst.String()
+			}
+			if len(bytes) == 0 {
+				break
+			}
+		}
+	}
+
+	return ""
+}
