@@ -14,6 +14,8 @@ var (
 	kcore     *os.File
 	kcoreElf  *elf.File
 	kcoreOnce sync.Once
+
+	initOffset uint64 = 0x20a00000
 )
 
 func parseKCore() {
@@ -27,7 +29,7 @@ func parseKCore() {
 
 }
 
-func FindJumps(symbol string) (jumps []uint64, err error) {
+func FindJumps2(symbol string) (jumps []uint64, err error) {
 	kcoreOnce.Do(parseKCore)
 
 	addr := Kaddr(symbol, false, false)
@@ -117,4 +119,58 @@ func getAsm(addr uint64) string {
 	}
 
 	return ""
+}
+
+func FindJumps(dwarf *DWARFParser, symbol string) (jumps []uint64, err error) {
+	kcoreOnce.Do(parseKCore)
+
+	addr := Kaddr(symbol, false, false)
+	this, next := NearestSymbol(addr)
+	leng := next.Addr - this.Addr
+
+	jumps = append(jumps, 0)
+	for _, prog := range kcoreElf.Progs {
+		if prog.Vaddr <= addr && prog.Vaddr+prog.Memsz >= addr {
+			bytes := make([]byte, leng)
+			if _, err = kcore.ReadAt(bytes, int64(prog.Off+addr-prog.Vaddr)); err != nil {
+				fmt.Println(err)
+			}
+			if len(bytes) == 0 {
+				continue
+			}
+			off := 0
+			lineInfos := make(map[LineInfo]uint64)
+			for {
+				inst, err := x86asm.Decode(bytes, 64)
+				if err != nil {
+					inst = x86asm.Inst{Len: 1}
+					off += 1
+				} else {
+					curAddr := addr + uint64(off)
+					lineInfo, err := dwarf.GetLineInfo(curAddr - initOffset)
+					//println("lineInfo:", lineInfo)
+					if err == nil {
+						_, ok := lineInfos[*lineInfo]
+						if !ok {
+							lineInfos[*lineInfo] = uint64(off)
+							//fmt.Printf("0x%x: %s:%d\n", curAddr-initOffset, lineInfo.Filename, lineInfo.Line)
+						}
+					}
+				}
+
+				bytes = bytes[inst.Len:]
+				off += inst.Len
+				if len(bytes) == 0 {
+					break
+				}
+			}
+
+			//println(len(lineInfos))
+			for _, a := range lineInfos {
+				jumps = append(jumps, a)
+			}
+		}
+	}
+
+	return
 }
