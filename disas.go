@@ -15,8 +15,62 @@ var (
 	kcoreElf  *elf.File
 	kcoreOnce sync.Once
 
-	initOffset uint64 = 0x20a00000
+	kcorePath   string = "/proc/kcore"
+	vmlinuxPath string = "/usr/lib/debug/boot/vmlinux-6.8.0-49-generic"
+
+	initOffset uint64
 )
+
+func init() {
+	kcoreOnce.Do(parseKCore)
+
+	kcoreElf, err := elf.NewFile(kcore)
+	if err != nil {
+		log.Fatalf("Failed to parse ELF file %s: %v", "/proc/kcore", err)
+	}
+
+	// Open vmlinux
+	vmlinuxFile, err := os.Open(vmlinuxPath)
+	if err != nil {
+		log.Fatalf("Failed to open %s: %v", vmlinuxPath, err)
+	}
+	defer vmlinuxFile.Close()
+
+	// Parse the ELF headers of vmlinux
+	vmlinuxElf, err := elf.NewFile(vmlinuxFile)
+	if err != nil {
+		log.Fatalf("Failed to parse ELF file %s: %v", vmlinuxPath, err)
+	}
+
+	// Extract the base address of the first LOAD segment in vmlinux
+	var vmlinuxBaseAddr uint64
+	for _, prog := range vmlinuxElf.Progs {
+		if prog.Type == elf.PT_LOAD {
+			vmlinuxBaseAddr = prog.Vaddr
+			break
+		}
+	}
+	if vmlinuxBaseAddr == 0 {
+		log.Fatalf("Failed to find the first LOAD segment in %s", vmlinuxPath)
+	}
+
+	// Get the base address of the first LOAD segment in /proc/kcore
+	var kcoreBaseAddr uint64
+	for _, prog := range kcoreElf.Progs {
+		if prog.Type == elf.PT_LOAD {
+			kcoreBaseAddr = prog.Vaddr
+			break
+		}
+	}
+	if kcoreBaseAddr == 0 {
+		log.Fatalf("Failed to find the first LOAD segment in %s", kcorePath)
+	}
+
+	// Calculate the KASLR offset
+	kaslrOffset := kcoreBaseAddr - vmlinuxBaseAddr
+	println("kaslrOffset:", kaslrOffset)
+	initOffset = kaslrOffset
+}
 
 func parseKCore() {
 	var err error
@@ -121,14 +175,14 @@ func getAsm(addr uint64) string {
 	return ""
 }
 
-func FindJumps(dwarf *DWARFParser, symbol string) (jumps []uint64, err error) {
+func FindJumps(dwarf *DWARFParser, symbol string) (lineInfos map[LineInfo][]uint64, err error) {
+	lineInfos = make(map[LineInfo][]uint64)
 	kcoreOnce.Do(parseKCore)
 
 	addr := Kaddr(symbol, false, false)
 	this, next := NearestSymbol(addr)
 	leng := next.Addr - this.Addr
 
-	jumps = append(jumps, 0)
 	for _, prog := range kcoreElf.Progs {
 		if prog.Vaddr <= addr && prog.Vaddr+prog.Memsz >= addr {
 			bytes := make([]byte, leng)
@@ -139,7 +193,6 @@ func FindJumps(dwarf *DWARFParser, symbol string) (jumps []uint64, err error) {
 				continue
 			}
 			off := 0
-			lineInfos := make(map[LineInfo]uint64)
 			for {
 				inst, err := x86asm.Decode(bytes, 64)
 				if err != nil {
@@ -148,13 +201,9 @@ func FindJumps(dwarf *DWARFParser, symbol string) (jumps []uint64, err error) {
 				} else {
 					curAddr := addr + uint64(off)
 					lineInfo, err := dwarf.GetLineInfo(curAddr - initOffset)
-					//println("lineInfo:", lineInfo)
 					if err == nil {
-						_, ok := lineInfos[*lineInfo]
-						if !ok {
-							lineInfos[*lineInfo] = uint64(off)
-							//fmt.Printf("0x%x: %s:%d\n", curAddr-initOffset, lineInfo.Filename, lineInfo.Line)
-						}
+						//println("lineInfo:", lineInfo)
+						lineInfos[*lineInfo] = append(lineInfos[*lineInfo], uint64(off))
 					}
 				}
 
@@ -165,10 +214,6 @@ func FindJumps(dwarf *DWARFParser, symbol string) (jumps []uint64, err error) {
 				}
 			}
 
-			//println(len(lineInfos))
-			for _, a := range lineInfos {
-				jumps = append(jumps, a)
-			}
 		}
 	}
 

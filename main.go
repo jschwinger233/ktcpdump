@@ -164,19 +164,22 @@ func main() {
 			if err != nil {
 				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
 			}
-			for _, jump := range jumps {
+			for _, js := range jumps {
 
-				//println("symbol:", symbol, "offset:", jump)
 				//if _, ok := asms[a+jump]; ok {
 				//	continue
 				//}
 				//asms[a+jump] = getAsm(a + jump)
-				k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: jump})
-				if err != nil {
-					log.Println("Failed to attach targets %s+%d: %+v\n", symbol, jump, err)
-					continue
+				for _, j := range js {
+					//println("symbol:", symbol, "offset:", j)
+					k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: j})
+					if err != nil {
+						log.Printf("Failed to attach targets %s+%d: %+v\n", symbol, j, err)
+						continue
+					}
+					defer k.Close()
+					break
 				}
-				defer k.Close()
 			}
 		} else {
 			// TODO: --verbose
