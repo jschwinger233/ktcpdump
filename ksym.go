@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"log"
 	"os"
 	"slices"
@@ -11,20 +12,28 @@ import (
 )
 
 type Symbol struct {
-	Type string
-	Name string
-	Addr uint64
+	Type            string
+	Name            string
+	Addr            uint64
+	AvailableFilter bool
 }
 
-var kallsyms []Symbol
-var kallsymsByName map[string]Symbol = make(map[string]Symbol)
-var kallsymsByAddr map[uint64]Symbol = make(map[uint64]Symbol)
-
-var availableFilterFuncs map[string]struct{} = make(map[string]struct{})
+var (
+	kallsyms             []*Symbol
+	kallsymsByName       map[string]*Symbol  = make(map[string]*Symbol)
+	kallsymsByAddr       map[uint64]*Symbol  = make(map[uint64]*Symbol)
+	availableFilterFuncs map[string]struct{} = make(map[string]struct{})
+)
 
 func init() {
 	readKallsyms()
 	readAvailableFilterFunctions()
+
+	for _, sym := range kallsyms {
+		if _, ok := availableFilterFuncs[sym.Name]; ok {
+			sym.AvailableFilter = true
+		}
+	}
 }
 
 func readKallsyms() {
@@ -42,80 +51,14 @@ func readKallsyms() {
 			continue
 		}
 		typ, name := parts[1], parts[2]
-		kallsyms = append(kallsyms, Symbol{typ, name, addr})
-		kallsymsByName[name] = Symbol{typ, name, addr}
-		kallsymsByAddr[addr] = Symbol{typ, name, addr}
+		symbol := &Symbol{typ, name, addr, false}
+		kallsyms = append(kallsyms, symbol)
+		kallsymsByName[name] = symbol
+		kallsymsByAddr[addr] = symbol
 	}
 	sort.Slice(kallsyms, func(i, j int) bool {
 		return kallsyms[i].Addr < kallsyms[j].Addr
 	})
-}
-
-func RefreshKallsyms() {
-	readKallsyms()
-}
-
-func NearestSymbol(addr uint64) (this, next Symbol) {
-	idx, _ := slices.BinarySearchFunc(kallsyms, addr, func(x Symbol, addr uint64) int { return int(x.Addr - addr) })
-	// TODO: handle panic
-	if idx == len(kallsyms) {
-		return kallsyms[idx-1], kallsyms[idx]
-	}
-	if kallsyms[idx].Addr == addr {
-		return kallsyms[idx], kallsyms[idx+1]
-	}
-	if idx == 0 {
-		return kallsyms[0], kallsyms[1]
-	}
-	return kallsyms[idx-1], kallsyms[idx]
-}
-
-func Kaddr(sym string, maybeSuffix bool, checkAvailability bool) (addr uint64) {
-	defer func() {
-		if addr != 0 {
-			if _, ok := availableFilterFuncs[sym]; !ok && checkAvailability {
-				addr = 0
-			}
-		}
-	}()
-
-	if addr := kallsymsByName[sym].Addr; addr != 0 {
-		return addr
-	}
-	if maybeSuffix {
-		possibleSuffixes := []string{".cold", ".constprop.0", ".isra.0"}
-		for _, suffix := range possibleSuffixes {
-			if addr := kallsymsByName[sym+suffix].Addr; addr != 0 {
-				sym = sym + suffix
-				return addr
-			}
-		}
-
-	}
-	return
-}
-
-func Ksym(addr uint64) string {
-	return kallsymsByAddr[addr].Name
-}
-
-func FirstKsym() (sym Symbol) {
-	for _, sym = range kallsyms {
-		if sym.Type == "t" {
-			return
-		}
-	}
-	return
-}
-
-func LastKsym() (sym Symbol) {
-	for i := len(kallsyms) - 1; i >= 0; i-- {
-		sym = kallsyms[i]
-		if sym.Type == "t" {
-			return
-		}
-	}
-	return
 }
 
 func readAvailableFilterFunctions() {
@@ -133,4 +76,58 @@ func readAvailableFilterFunctions() {
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("Failed to read available_filter_functions: %s\n", err)
 	}
+}
+
+func NearestKsym(addr uint64) (this, next *Symbol) {
+	idx, _ := slices.BinarySearchFunc(kallsyms, addr, func(x *Symbol, addr uint64) int { return int(x.Addr - addr) })
+	if idx == len(kallsyms) {
+		return kallsyms[idx-1], nil
+	}
+	if kallsyms[idx].Addr == addr {
+		return kallsyms[idx], kallsyms[idx+1]
+	}
+	if idx == 0 {
+		return kallsyms[0], kallsyms[1]
+	}
+	return kallsyms[idx-1], kallsyms[idx]
+}
+
+func KsymByAddr(addr uint64) (sym *Symbol, err error) {
+	sym, ok := kallsymsByAddr[addr]
+	if !ok {
+		return nil, errors.New("symbol not found")
+	}
+	return sym, nil
+}
+
+func KsymByName(name string) (sym *Symbol, err error) {
+	name, err = normalizeKname(name)
+	if err != nil {
+		return
+	}
+	return kallsymsByName[name], nil
+}
+
+func normalizeKname(name string) (string, error) {
+	possibleSuffixes := []string{
+		"",
+		".cold",
+		".constprop.0",
+		".constprop.0.cold",
+		".constprop.0.isra.0",
+		".constprop.0.isra.0.cold",
+		".isra.0",
+		".isra.0.cold",
+		".part.0",
+		".part.0.cold",
+		".part.0.constprop.0",
+		".part.0.isra.0",
+		".part.0.isra.0.cold",
+	}
+	for _, suffix := range possibleSuffixes {
+		if _, ok := kallsymsByName[name+suffix]; ok {
+			return name + suffix, nil
+		}
+	}
+	return "", errors.New("symbol not found")
 }

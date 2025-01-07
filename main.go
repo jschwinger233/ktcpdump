@@ -99,7 +99,6 @@ func main() {
 	}
 	defer k.Close()
 
-	//asms := map[uint64]string{}
 	dwarf, err := NewDWARFParser("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
 	if err != nil {
 		log.Fatalf("Error initializing parser: %v", err)
@@ -146,7 +145,7 @@ func main() {
 		if result["sym"] == "" && address == 0 {
 			log.Fatalf("Invalid target: %s\n", target)
 		} else if result["sym"] == "" && address != 0 {
-			sym, _ := NearestSymbol(address)
+			sym, _ := NearestKsym(address)
 			symbol = sym.Name
 			offset = sym.Addr - address
 		} else if result["sym"] != "" && address == 0 {
@@ -157,7 +156,6 @@ func main() {
 			offset = address
 		}
 
-		//a := Kaddr(symbol, false, false)
 		if attachJumps {
 
 			jumps, err := FindJumps(dwarf, symbol)
@@ -165,13 +163,8 @@ func main() {
 				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
 			}
 			for _, js := range jumps {
-
-				//if _, ok := asms[a+jump]; ok {
-				//	continue
-				//}
-				//asms[a+jump] = getAsm(a + jump)
 				for _, j := range js {
-					//println("symbol:", symbol, "offset:", j)
+					fmt.Printf("Attaching %s+%d\n", symbol, j)
 					k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: j})
 					if err != nil {
 						log.Printf("Failed to attach targets %s+%d: %+v\n", symbol, j, err)
@@ -182,10 +175,6 @@ func main() {
 				}
 			}
 		} else {
-			// TODO: --verbose
-			//println("symbol:", symbol, "offset:", offset)
-
-			//asms[a+offset] = getAsm(a + offset)
 			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
 			if err != nil {
 				log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
@@ -218,13 +207,14 @@ func main() {
 	}
 	skbBuildAddrs := make([]uintptr, 0, len(skbBuildFuncs))
 	for _, skbBuildFunc := range skbBuildFuncs {
-		addr := Kaddr(skbBuildFunc, true, true)
-		if addr == 0 {
-			// TODO: fallback to kprobe
-			//println("Symbol not found for skb build:", skbBuildFunc)
+		ksym, err := KsymByName(skbBuildFunc)
+		if err != nil {
+			log.Fatalf("Failed to find ksym %s: %s\n", skbBuildFunc, err)
+		}
+		if !ksym.AvailableFilter {
 			continue
 		}
-		skbBuildAddrs = append(skbBuildAddrs, uintptr(addr))
+		skbBuildAddrs = append(skbBuildAddrs, uintptr(ksym.Addr))
 	}
 	kr, err := link.KretprobeMulti(objs.KretprobeSkbBuild, link.KprobeMultiOptions{Addresses: skbBuildAddrs})
 	if err != nil {
@@ -284,7 +274,7 @@ func main() {
 			continue
 		}
 
-		sym, _ := NearestSymbol(event.At)
+		sym, _ := NearestKsym(event.At)
 		lineInfo, err := dwarf.GetLineInfo(event.At - 1 - initOffset)
 		if err != nil {
 			lineInfo, err = dwarf.GetLineInfo(event.At - 4 - initOffset)
