@@ -18,6 +18,11 @@ type Symbol struct {
 	AvailableFilter bool
 }
 
+const (
+	kallsymsPath                 = "/proc/kallsyms"
+	availableFilterFunctionsPath = "/sys/kernel/debug/tracing/available_filter_functions"
+)
+
 var (
 	kallsyms             []*Symbol
 	kallsymsByName       map[string]*Symbol  = make(map[string]*Symbol)
@@ -37,7 +42,7 @@ func init() {
 }
 
 func readKallsyms() {
-	data, err := os.ReadFile("/proc/kallsyms")
+	data, err := os.ReadFile(kallsymsPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,7 +67,7 @@ func readKallsyms() {
 }
 
 func readAvailableFilterFunctions() {
-	f, err := os.Open("/sys/kernel/debug/tracing/available_filter_functions")
+	f, err := os.Open(availableFilterFunctionsPath)
 	if err != nil {
 		log.Fatalf("Failed to open available_filter_functions: %s\n", err)
 	}

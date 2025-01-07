@@ -275,9 +275,9 @@ func main() {
 		}
 
 		sym, _ := NearestKsym(event.At)
-		lineInfo, err := dwarf.GetLineInfo(event.At - 1 - initOffset)
+		lineInfo, err := dwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
 		if err != nil {
-			lineInfo, err = dwarf.GetLineInfo(event.At - 4 - initOffset)
+			lineInfo, err = dwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
 		}
 
 		fmt.Printf("%-4d %-18x %-10d %-18x %-16s %s:%d\n", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr), lineInfo.Filename, lineInfo.Line)
