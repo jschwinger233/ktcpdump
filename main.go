@@ -7,8 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	// TODO: slog
-	"log"
+	log "log/slog"
 	"os"
 	"os/signal"
 	"regexp"
@@ -37,12 +36,14 @@ func init() {
 func main() {
 	spec, err := bpf.LoadBpf()
 	if err != nil {
-		log.Fatalf("Failed to load BPF: %s\n", err)
+		log.Error("Failed to load BPF", "err", err)
+		return
 	}
 
 	prog, ok := spec.Programs["kprobe_skb_by_search"]
 	if !ok {
-		log.Fatalf("Failed to find kprobe_skb_by_search\n")
+		log.Error("Failed to find kprobe_skb_by_search")
+		return
 	}
 	if prog.Instructions, err = elibpcap.Inject(
 		config.Pcapfilter,
@@ -53,7 +54,8 @@ func main() {
 			L2Skb:      true,
 		},
 	); err != nil {
-		log.Fatalf("Failed to inject kprobe_pcap_filter_l2: %s\n", err)
+		log.Error("Failed to inject kprobe_pcap_filter_l2", "err", err)
+		return
 	}
 	if prog.Instructions, err = elibpcap.Inject(
 		config.Pcapfilter,
@@ -73,7 +75,8 @@ func main() {
 				L2Skb:      false,
 			},
 		); err != nil {
-			log.Fatalf("Failed to inject kprobe_pcap_filter_l3: %s\n", err)
+			log.Error("Failed to inject kprobe_pcap_filter_l3", "err", err)
+			return
 		}
 	}
 
@@ -90,12 +93,14 @@ func main() {
 			verifierLog = fmt.Sprintf("Verifier error: %+v\n", ve)
 		}
 
-		log.Fatalf("Failed to load objects: %s\n%+v", verifierLog, err)
+		log.Error("Failed to load objects", "verifierLog", verifierLog, "err", err)
+		return
 	}
 
 	k, err := link.Kprobe("kfree_skbmem", objs.KprobeSkbFree, nil)
 	if err != nil {
-		log.Fatalf("Failed to attach kfree_skbmem: %+v\n", err)
+		log.Error("Failed to attach kfree_skbmem", "err", err)
+		return
 	}
 	defer k.Close()
 
@@ -130,14 +135,16 @@ func main() {
 				address, err = strconv.ParseUint(result["addr"], 10, 64)
 			}
 			if err != nil {
-				log.Fatalf("Invalid address: %s\n", result["addr"])
+				log.Error("Invalid address", "addr", result["addr"])
+				return
 			}
 		}
 
 		var symbol string
 		var offset uint64
 		if result["sym"] == "" && address == 0 {
-			log.Fatalf("Invalid target: %s\n", target)
+			log.Error("Invalid target", "target", target)
+			return
 		} else if result["sym"] == "" && address != 0 {
 			sym, _ := NearestKsym(address)
 			symbol = sym.Name
@@ -153,18 +160,20 @@ func main() {
 		if attachJumps {
 			kcore, err := NewKcore()
 			if err != nil {
-				log.Fatalf("Failed to new kcore: %s\n", err)
+				log.Error("Failed to new kcore", "err", err)
+				return
 			}
 			jumps, err := kcore.FindLines(symbol)
 			if err != nil {
-				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
+				log.Error("Failed to find jumps", "symbol", symbol, "err", err)
+				return
 			}
 			for _, js := range jumps {
 				for _, j := range js {
-					fmt.Printf("Attaching %s+%d\n", symbol, j)
+					log.Debug("Attaching", "symbol", symbol, "offset", j)
 					k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: j})
 					if err != nil {
-						log.Printf("Failed to attach targets %s+%d: %+v\n", symbol, j, err)
+						log.Debug("Failed to attach targets", "symbol", symbol, "offset", j, "err", err)
 						continue
 					}
 					defer k.Close()
@@ -174,7 +183,8 @@ func main() {
 		} else {
 			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
 			if err != nil {
-				log.Fatalf("Failed to attach targets %s: %+v\n", target, err)
+				log.Error("Failed to attach", "target", target, "err", err)
+				return
 			}
 			defer k.Close()
 		}
@@ -183,7 +193,8 @@ func main() {
 	skbBuildFuncs := []string{}
 	btfSpec, err := btf.LoadKernelSpec()
 	if err != nil {
-		log.Fatalf("Failed to load kernel BTF: %+v\n", err)
+		log.Error("Failed to load kernel BTF", "err", err)
+		return
 	}
 	iter := btfSpec.Iterate()
 	for iter.Next() {
@@ -206,7 +217,8 @@ func main() {
 	for _, skbBuildFunc := range skbBuildFuncs {
 		ksym, err := KsymByName(skbBuildFunc)
 		if err != nil {
-			log.Fatalf("Failed to find ksym %s: %s\n", skbBuildFunc, err)
+			log.Error("Failed to find ksym", "symbol", skbBuildFunc, "err", err)
+			return
 		}
 		if !ksym.AvailableFilter {
 			continue
@@ -215,13 +227,15 @@ func main() {
 	}
 	kr, err := link.KretprobeMulti(objs.KretprobeSkbBuild, link.KprobeMultiOptions{Addresses: skbBuildAddrs})
 	if err != nil {
-		log.Fatalf("Failed to attach skb build funcs: %+v\n", err)
+		log.Error("Failed to attach skb build funcs", "err", err)
+		return
 	}
 	defer kr.Close()
 
 	eventsReader, err := ringbuf.NewReader(objs.EventRingbuf)
 	if err != nil {
-		log.Fatalf("Failed to create ringbuf reader: %+v\n", err)
+		log.Error("Failed to create ringbuf reader", "err", err)
+		return
 	}
 	defer eventsReader.Close()
 
@@ -235,20 +249,23 @@ func main() {
 
 	host, err := sysinfo.Host()
 	if err != nil {
-		log.Fatalf("Failed to get host info: %s\n", err)
+		log.Error("Failed to get host info", "err", err)
+		return
 	}
 	bootTime := host.Info().BootTime
 
 	f, err := os.Create(config.PcapFilename)
 	if err != nil {
-		log.Fatalf("Failed to create pcap file: %s\n", err)
+		log.Error("Failed to create pcap file", "err", err)
+		return
 	}
 	defer f.Close()
 
 	pcapw := pcapgo.NewWriter(f)
 	linktype := layers.LinkTypeEthernet
 	if err = pcapw.WriteFileHeader(1600, linktype); err != nil {
-		log.Fatalf("Failed to write pcap file header: %s\n", err)
+		log.Error("Failed to write pcap file header", "err", err)
+		return
 	}
 
 	fmt.Printf("%-4s %-18s %-10s %-18s %-16s %s\n", "no", "skb", "skb->len", "pc", "ksym", "addr2line")
@@ -256,7 +273,8 @@ func main() {
 
 	kdwarf, err := GetKdwarf()
 	if err != nil {
-		log.Fatalf("Failed to get kdwarf: %s\n", err)
+		log.Error("Failed to get kdwarf", "err", err)
+		return
 	}
 	for {
 		i++
@@ -265,18 +283,19 @@ func main() {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				return
 			}
-			log.Printf("failed to read ringbuf: %+v", err)
+			log.Debug("failed to read ringbuf", "err", err)
 			continue
 		}
 
 		var event bpf.BpfEvent
 		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &event); err != nil {
-			log.Printf("failed to parse ringbuf event: %+v", err)
+			log.Debug("failed to parse ringbuf event", "err", err)
 			continue
 		}
 
 		if err != nil {
-			log.Fatalf("Failed to get dwarf: %s\n", err)
+			log.Error("Failed to get dwarf", "err", err)
+			return
 		}
 		sym, _ := NearestKsym(event.At)
 		lineInfo, err := kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
@@ -291,12 +310,12 @@ func main() {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				return
 			}
-			log.Printf("failed to read ringbuf: %+v", err)
+			log.Debug("failed to read ringbuf", "err", err)
 			continue
 		}
 		skbData := make([]byte, event.DataLen)
 		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &skbData); err != nil {
-			log.Printf("failed to parse ringbuf skbdata: %v", err)
+			log.Debug("failed to parse ringbuf skbdata", "err", err)
 			continue
 		}
 
@@ -318,7 +337,7 @@ func main() {
 		}
 		payload = append(payload, skbData...)
 		if err = pcapw.WritePacket(captureInfo, payload); err != nil {
-			log.Printf("failed to write packet: %v", err)
+			log.Debug("failed to write packet", "err", err)
 		}
 
 	}

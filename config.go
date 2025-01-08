@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	log "log/slog"
 	"os"
 	"strings"
 
@@ -30,8 +31,12 @@ func init() {
 	config.Pcapfilter = strings.Join(pflag.Args(), " ")
 
 	if help || len(config.Pcapfilter) == 0 {
-		fmt.Fprintf(os.Stderr, "ktcpdump [ -i kfunc ] [ -w file ] [ -d vmlinux-dbg ] -v expresssion\n")
+		fmt.Fprintf(os.Stderr, "ktcpdump [ -i kfunc ] [ -w file ] [ -d vmlinux-dbg ] [ -v ] expresssion\n")
 		pflag.PrintDefaults()
 		os.Exit(1)
+	}
+
+	if config.Verbose {
+		log.SetDefault(log.New(log.NewTextHandler(os.Stdout, &log.HandlerOptions{Level: log.LevelDebug})))
 	}
 }
