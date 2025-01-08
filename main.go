@@ -99,11 +99,6 @@ func main() {
 	}
 	defer k.Close()
 
-	dwarf, err := NewKdwarf("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
-	if err != nil {
-		log.Fatalf("Error initializing parser: %v", err)
-	}
-
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)
 		result := make(map[string]string)
@@ -156,8 +151,11 @@ func main() {
 		}
 
 		if attachJumps {
-
-			jumps, err := FindJumps(dwarf, symbol)
+			kcore, err := NewKcore()
+			if err != nil {
+				log.Fatalf("Failed to new kcore: %s\n", err)
+			}
+			jumps, err := kcore.FindLines(symbol)
 			if err != nil {
 				log.Fatalf("Failed to find jumps for %s: %s\n", symbol, err)
 			}
@@ -256,6 +254,10 @@ func main() {
 	fmt.Printf("%-4s %-18s %-10s %-18s %-16s %s\n", "no", "skb", "skb->len", "pc", "ksym", "addr2line")
 	i := 0
 
+	kdwarf, err := GetKdwarf()
+	if err != nil {
+		log.Fatalf("Failed to get kdwarf: %s\n", err)
+	}
 	for {
 		i++
 		rec, err := eventsReader.Read()
@@ -273,10 +275,13 @@ func main() {
 			continue
 		}
 
-		sym, _ := NearestKsym(event.At)
-		lineInfo, err := dwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
 		if err != nil {
-			lineInfo, err = dwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
+			log.Fatalf("Failed to get dwarf: %s\n", err)
+		}
+		sym, _ := NearestKsym(event.At)
+		lineInfo, err := kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
+		if err != nil {
+			lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
 		}
 
 		fmt.Printf("%-4d %-18x %-10d %-18x %-16s %s:%d\n", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr), lineInfo.Filename, lineInfo.Line)

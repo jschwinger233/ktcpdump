@@ -4,6 +4,12 @@ import (
 	"debug/dwarf"
 	"debug/elf"
 	"fmt"
+	"sync"
+)
+
+var (
+	kdwarfOnce sync.Once
+	kdwarf     *Kdwarf
 )
 
 type LineInfo struct {
@@ -43,6 +49,13 @@ func NewKdwarf(path string) (*Kdwarf, error) {
 		return nil, err
 	}
 	return kdwarf, kdwarf.parseLineInfos()
+}
+
+func GetKdwarf() (_ *Kdwarf, err error) {
+	kdwarfOnce.Do(func() {
+		kdwarf, err = NewKdwarf("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
+	})
+	return kdwarf, err
 }
 
 func (p *Kdwarf) parseSymbols() (err error) {
