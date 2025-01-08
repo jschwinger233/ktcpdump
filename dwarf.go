@@ -4,47 +4,24 @@ import (
 	"debug/dwarf"
 	"debug/elf"
 	"fmt"
-	"log"
-	"sync"
 )
-
-const (
-	linuxImageDbgsymPath = "/usr/lib/debug/boot/vmlinux-6.8.0-49-generic"
-)
-
-var dwarfData *dwarf.Data
-
-func init() {
-	file, err := elf.Open(linuxImageDbgsymPath)
-	if err != nil {
-		log.Fatalf("failed to open ELF file: %s", err)
-	}
-	defer file.Close()
-
-	dwarfData, err = file.DWARF()
-	if err != nil {
-		log.Fatalf("failed to get DWARF data: %s", err)
-	}
-
-}
 
 type LineInfo struct {
 	Filename string
 	Line     int
 }
 
-type DWARFParser struct {
-	filePath   string
-	file       *elf.File
-	dwarfData  *dwarf.Data
-	lineCache  sync.Map
-	cacheMutex sync.Mutex
-	loaded     bool
-	symbols    map[string]uint64
+type Kdwarf struct {
+	path      string
+	file      *elf.File
+	dwarfData *dwarf.Data
+
+	lineInfos map[uint64]*LineInfo
+	symbols   map[string]uint64
 }
 
-func NewDWARFParser(elfPath string) (*DWARFParser, error) {
-	file, err := elf.Open(elfPath)
+func NewKdwarf(path string) (*Kdwarf, error) {
+	file, err := elf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ELF file: %w", err)
 	}
@@ -55,55 +32,39 @@ func NewDWARFParser(elfPath string) (*DWARFParser, error) {
 		return nil, fmt.Errorf("failed to get DWARF data: %w", err)
 	}
 
-	parser := &DWARFParser{
+	kdwarf := &Kdwarf{
 		file:      file,
-		filePath:  elfPath,
+		path:      path,
 		dwarfData: dwarfData,
 		symbols:   make(map[string]uint64),
+		lineInfos: make(map[uint64]*LineInfo),
 	}
-	parser.parseSymbols()
-	return parser, nil
+	if err := kdwarf.parseSymbols(); err != nil {
+		return nil, err
+	}
+	return kdwarf, kdwarf.parseLineInfos()
 }
 
-func (p *DWARFParser) Close() error {
-	return nil
-}
-
-func (p *DWARFParser) parseSymbols() (err error) {
-	// Decode symbols
+func (p *Kdwarf) parseSymbols() (err error) {
 	symbolTable, err := p.file.Symbols()
 	if err != nil {
 		return
 	}
 
-	// Cache symbol information
 	for _, sym := range symbolTable {
 		if sym.Name != "" {
 			p.symbols[sym.Name] = sym.Value
 		}
 	}
-	println("symbols", len(p.symbols), p.symbols["__fib_validate_source"])
 	return nil
 }
 
-func (p *DWARFParser) GetLineInfo(symbol string, offset uint64) (*LineInfo, error) {
-	address, found := p.symbols[symbol]
-	if !found {
-		return nil, fmt.Errorf("symbol %s not found in DWARF data", symbol)
-	}
-	address += offset
-	if p.loaded {
-		if cached, found := p.lineCache.Load(address); found {
-			return cached.(*LineInfo), nil
-		}
-		return nil, fmt.Errorf("address 0x%x not found in DWARF data", address)
-	}
-
+func (p *Kdwarf) parseLineInfos() (err error) {
 	reader := p.dwarfData.Reader()
 	for {
 		entry, err := reader.Next()
 		if err != nil {
-			return nil, fmt.Errorf("error reading DWARF entry: %w", err)
+			return fmt.Errorf("error reading DWARF entry: %w", err)
 		}
 		if entry == nil {
 			break
@@ -112,7 +73,7 @@ func (p *DWARFParser) GetLineInfo(symbol string, offset uint64) (*LineInfo, erro
 		if entry.Tag == dwarf.TagCompileUnit {
 			lineReader, err := p.dwarfData.LineReader(entry)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get line reader: %w", err)
+				return fmt.Errorf("failed to get line reader: %w", err)
 			}
 
 			var lineEntry dwarf.LineEntry
@@ -129,13 +90,24 @@ func (p *DWARFParser) GetLineInfo(symbol string, offset uint64) (*LineInfo, erro
 					Filename: lineEntry.File.Name,
 					Line:     lineEntry.Line,
 				}
-				p.lineCache.Store(lineEntry.Address, info)
+				p.lineInfos[lineEntry.Address] = info
 
 			}
 		}
 	}
+	return
+}
 
-	p.loaded = true
+func (p *Kdwarf) GetLineInfo(symbol string, offset uint64) (*LineInfo, error) {
+	address, found := p.symbols[symbol]
+	if !found {
+		return nil, fmt.Errorf("symbol %s not found in DWARF data", symbol)
+	}
 
-	return p.GetLineInfo(symbol, offset)
+	address += offset
+
+	if lineInfo, found := p.lineInfos[address]; found {
+		return lineInfo, nil
+	}
+	return nil, fmt.Errorf("address 0x%x not found in DWARF data", address)
 }

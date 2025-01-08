@@ -99,11 +99,10 @@ func main() {
 	}
 	defer k.Close()
 
-	dwarf, err := NewDWARFParser("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
+	dwarf, err := NewKdwarf("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
 	if err != nil {
 		log.Fatalf("Error initializing parser: %v", err)
 	}
-	defer dwarf.Close()
 
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)

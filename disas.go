@@ -15,8 +15,7 @@ var (
 	kcoreElf  *elf.File
 	kcoreOnce sync.Once
 
-	kcorePath   string = "/proc/kcore"
-	vmlinuxPath string = "/usr/lib/debug/boot/vmlinux-6.8.0-49-generic"
+	kcorePath string = "/proc/kcore"
 
 	initOffset uint64
 )
@@ -37,7 +36,7 @@ func parseKCore() {
 
 }
 
-func FindJumps(dwarf *DWARFParser, symbol string) (lineInfos map[LineInfo][]uint64, err error) {
+func FindJumps(dwarf *Kdwarf, symbol string) (lineInfos map[LineInfo][]uint64, err error) {
 	lineInfos = make(map[LineInfo][]uint64)
 	kcoreOnce.Do(parseKCore)
 
