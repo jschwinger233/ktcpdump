@@ -52,8 +52,11 @@ func NewKdwarf(path string) (*Kdwarf, error) {
 }
 
 func GetKdwarf() (_ *Kdwarf, err error) {
+	if config.DbgImagePath == "" {
+		return nil, fmt.Errorf("-d vmlinux-dbg is required")
+	}
 	kdwarfOnce.Do(func() {
-		kdwarf, err = NewKdwarf("/usr/lib/debug/boot/vmlinux-6.8.0-49-generic")
+		kdwarf, err = NewKdwarf(config.DbgImagePath)
 	})
 	return kdwarf, err
 }
