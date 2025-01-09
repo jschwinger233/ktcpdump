@@ -130,17 +130,13 @@ kprobe_pcap_filter(struct sk_buff *skb)
 
 /* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
 SEC("kprobe/skb_by_search")
-int kprobe_skb_by_search(struct pt_regs *ctx) {
+int kprobe_skb_by_search(struct pt_regs *ctx)
+{
 	struct sk_buff *skb;
 
 	skb = (struct sk_buff *)search_skb_from_register(ctx);
-	if (!skb) {
+	if (!skb)
 		skb = (struct sk_buff *)search_skb_from_stack(ctx);
-		if (skb)
-			bpf_printk("skb from stack: %llx\n", skb);
-	} else {
-		bpf_printk("skb from register: %llx\n", skb);
-	}
 	if (!skb)
 		return BPF_OK;
 
@@ -181,7 +177,8 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 
 /* kretprobe_skb will be attached to all kretprobe targets with skb retval */
 SEC("kretprobe/skb_build")
-int kretprobe_skb_build(struct pt_regs *ctx) {
+int kretprobe_skb_build(struct pt_regs *ctx)
+{
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC(ctx);
 	bpf_map_update_elem(&alive_skbs, &skb, &TRUE, BPF_ANY);
 	return BPF_OK;
@@ -189,7 +186,8 @@ int kretprobe_skb_build(struct pt_regs *ctx) {
 
 /* skb_free will be attached to kfree_skbmem. */
 SEC("kprobe/skb_free")
-int kprobe_skb_free(struct pt_regs *ctx) {
+int kprobe_skb_free(struct pt_regs *ctx)
+{
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_PARM1(ctx);
 	bpf_map_delete_elem(&alive_skbs, &skb);
 
