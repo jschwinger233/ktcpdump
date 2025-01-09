@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -104,6 +103,7 @@ func main() {
 	}
 	defer k.Close()
 
+	var attachByLine bool
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)
 		result := make(map[string]string)
@@ -113,30 +113,24 @@ func main() {
 			}
 		}
 		if result["sym"] != "" && result["addr"] == "" {
-			_, err := strconv.Atoi(result["sym"])
-			isDigit := err == nil
-			if strings.HasPrefix(result["sym"], "0x") || isDigit {
+			_, ok := IsDigit(result["sym"])
+			if ok {
 				result["addr"] = result["sym"]
 				delete(result, "sym")
 			}
 		}
 
-		var address uint64
+		var ok bool
 		var err error
-		var attachJumps bool
+		var address uint64
 		if result["addr"] == "*" {
-			attachJumps = true
+			attachByLine = true
 			delete(result, "addr")
 		}
 		if result["addr"] != "" {
-			if strings.HasPrefix(result["addr"], "0x") {
-				address, err = strconv.ParseUint(result["addr"][2:], 16, 64)
-			} else {
-				address, err = strconv.ParseUint(result["addr"], 10, 64)
-			}
-			if err != nil {
+			address, ok = IsDigit(result["addr"])
+			if !ok {
 				log.Error("Invalid address", "addr", result["addr"])
-				return
 			}
 		}
 
@@ -157,7 +151,7 @@ func main() {
 			offset = address
 		}
 
-		if attachJumps {
+		if attachByLine {
 			kcore, err := NewKcore()
 			if err != nil {
 				log.Error("Failed to new kcore", "err", err)
@@ -187,6 +181,15 @@ func main() {
 				return
 			}
 			defer k.Close()
+		}
+	}
+
+	var kdwarf *Kdwarf
+	if attachByLine {
+		kdwarf, err = GetKdwarf()
+		if err != nil {
+			log.Error("Failed to get kdwarf", "err", err)
+			return
 		}
 	}
 
@@ -223,7 +226,7 @@ func main() {
 		log.Debug("Attaching", "symbol", ksym.Name)
 		kr, err := link.Kretprobe(ksym.Name, objs.KretprobeSkbBuild, nil)
 		if err != nil {
-			log.Error("Failed to attach skb build func", "symbol", ksym.Name, "err", err)
+			log.Debug("Failed to attach skb build func", "symbol", ksym.Name, "err", err)
 			continue
 		}
 		defer kr.Close()
@@ -265,14 +268,13 @@ func main() {
 		return
 	}
 
-	fmt.Printf("%-4s %-18s %-10s %-18s %-16s %s\n", "no", "skb", "skb->len", "pc", "ksym", "addr2line")
+	fmt.Printf("%-4s %-18s %-10s %-18s %-16s", "no", "skb", "skb->len", "pc", "ksym")
+	if attachByLine {
+		fmt.Printf(" addr2line")
+	}
+	fmt.Println()
 	i := 0
 
-	kdwarf, err := GetKdwarf()
-	if err != nil {
-		log.Error("Failed to get kdwarf", "err", err)
-		return
-	}
 	for {
 		i++
 		rec, err := eventsReader.Read()
@@ -295,12 +297,20 @@ func main() {
 			return
 		}
 		sym, _ := NearestKsym(event.At)
-		lineInfo, err := kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
-		if err != nil {
-			lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
+
+		var lineInfo *LineInfo
+		if attachByLine {
+			lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
+			if err != nil {
+				lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
+			}
 		}
 
-		fmt.Printf("%-4d %-18x %-10d %-18x %-16s %s:%d\n", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr), lineInfo.Filename, lineInfo.Line)
+		fmt.Printf("%-4d %-18x %-10d %-18x %-16s", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr))
+		if attachByLine {
+			fmt.Printf(" %s:%d", lineInfo.Filename, lineInfo.Line)
+		}
+		fmt.Println()
 
 		rec, err = eventsReader.Read()
 		if err != nil {
