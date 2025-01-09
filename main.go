@@ -330,6 +330,8 @@ func main() {
 			ethertype := make([]byte, 2)
 			binary.BigEndian.PutUint16(ethertype, uint16(event.Protocol))
 			payload = append(payload, ethertype[1], ethertype[0])
+			captureInfo.Length += 14
+			captureInfo.CaptureLength += 14
 
 		}
 		payload = append(payload, skbData...)
