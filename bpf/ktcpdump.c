@@ -180,7 +180,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx) {
 }
 
 /* kretprobe_skb will be attached to all kretprobe targets with skb retval */
-SEC("kretprobe.multi/skb_build")
+SEC("kretprobe/skb_build")
 int kretprobe_skb_build(struct pt_regs *ctx) {
 	struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC(ctx);
 	bpf_map_update_elem(&alive_skbs, &skb, &TRUE, BPF_ANY);

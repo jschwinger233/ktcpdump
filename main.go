@@ -213,24 +213,21 @@ func main() {
 			}
 		}
 	}
-	skbBuildAddrs := make([]uintptr, 0, len(skbBuildFuncs))
 	for _, skbBuildFunc := range skbBuildFuncs {
+
 		ksym, err := KsymByName(skbBuildFunc)
 		if err != nil {
 			log.Error("Failed to find ksym", "symbol", skbBuildFunc, "err", err)
-			return
-		}
-		if !ksym.AvailableFilter {
 			continue
 		}
-		skbBuildAddrs = append(skbBuildAddrs, uintptr(ksym.Addr))
+		log.Debug("Attaching", "symbol", ksym.Name)
+		kr, err := link.Kretprobe(ksym.Name, objs.KretprobeSkbBuild, nil)
+		if err != nil {
+			log.Error("Failed to attach skb build func", "symbol", ksym.Name, "err", err)
+			continue
+		}
+		defer kr.Close()
 	}
-	kr, err := link.KretprobeMulti(objs.KretprobeSkbBuild, link.KprobeMultiOptions{Addresses: skbBuildAddrs})
-	if err != nil {
-		log.Error("Failed to attach skb build funcs", "err", err)
-		return
-	}
-	defer kr.Close()
 
 	eventsReader, err := ringbuf.NewReader(objs.EventRingbuf)
 	if err != nil {
