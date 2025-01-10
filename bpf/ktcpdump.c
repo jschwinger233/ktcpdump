@@ -128,7 +128,6 @@ kprobe_pcap_filter(struct sk_buff *skb)
 				     data, data_end);
 }
 
-/* kprobe_skb_by_search will be attached to all kprobe targets in -k. */
 SEC("kprobe/skb_by_search")
 int kprobe_skb_by_search(struct pt_regs *ctx)
 {
@@ -175,7 +174,6 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	return BPF_OK;
 }
 
-/* kretprobe_skb will be attached to all kretprobe targets with skb retval */
 SEC("kretprobe/skb_build")
 int kretprobe_skb_build(struct pt_regs *ctx)
 {
@@ -184,7 +182,6 @@ int kretprobe_skb_build(struct pt_regs *ctx)
 	return BPF_OK;
 }
 
-/* skb_free will be attached to kfree_skbmem. */
 SEC("kprobe/skb_free")
 int kprobe_skb_free(struct pt_regs *ctx)
 {
