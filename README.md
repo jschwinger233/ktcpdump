@@ -18,7 +18,7 @@ Please download the latest binary in the [releases](https://github.com/jschwinge
 
     ```
     # follow https://documentation.ubuntu.com/server/reference/debugging/debug-symbol-packages/
-    sudo apt-get install linux-image-`uname -r`-dbgsym``
+    sudo apt-get install linux-image-`uname -r`-dbgsym
     ```
 
 
