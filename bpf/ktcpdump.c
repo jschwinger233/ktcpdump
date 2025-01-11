@@ -19,8 +19,10 @@ struct event {
 	u64 skb;
 	u32 skb_len;
 	u32 data_len;
+	u32 capture_len;
 	u16 protocol;
 	u8 has_mac;
+	u8 data[MAX_DATA_SIZE];
 };
 
 struct {
@@ -162,15 +164,11 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	u32 data_len = event->data_len > MAX_DATA_SIZE
 		? MAX_DATA_SIZE
 		: event->data_len;
+	event->capture_len = data_len;
 
-	struct skb_data *skb_data = bpf_map_lookup_elem(&skb_data_stash, &ZERO);
-	if (!skb_data)
-		return BPF_OK;
-
-	bpf_probe_read_kernel(&skb_data->data, data_len, (void *)(skb_head + off_l2_or_l3));
+	bpf_probe_read_kernel(&event->data, data_len, (void *)(skb_head + off_l2_or_l3));
 
 	bpf_ringbuf_output(&event_ringbuf, event, sizeof(*event), 0);
-	bpf_ringbuf_output(&event_ringbuf, &skb_data->data, data_len, 0);
 	return BPF_OK;
 }
 

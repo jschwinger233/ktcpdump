@@ -312,23 +312,12 @@ func main() {
 		}
 		fmt.Println()
 
-		rec, err = eventsReader.Read()
-		if err != nil {
-			if errors.Is(err, ringbuf.ErrClosed) {
-				return
-			}
-			log.Debug("failed to read ringbuf", "err", err)
-			continue
-		}
-		skbData := make([]byte, event.DataLen)
-		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &skbData); err != nil {
-			log.Debug("failed to parse ringbuf skbdata", "err", err)
-			continue
-		}
+		skbData := make([]byte, event.CaptureLen)
+		copy(skbData, event.Data[:event.CaptureLen])
 
 		captureInfo := gopacket.CaptureInfo{
 			Timestamp:     bootTime.Add(time.Duration(event.Ts)),
-			CaptureLength: int(event.DataLen),
+			CaptureLength: int(event.CaptureLen),
 			Length:        int(event.DataLen),
 		}
 		payload := []byte{}
