@@ -112,12 +112,15 @@ kprobe_pcap_filter_l2(void *_skb, void *__skb, void *___skb, void *data, void* d
 }
 
 static __always_inline bool
-kprobe_pcap_filter(struct sk_buff *skb)
+kprobe_pcap_filter(struct sk_buff *skb, u8 *has_mac)
 {
 	void *skb_head = BPF_CORE_READ(skb, head);
 	void *data_end = skb_head + BPF_CORE_READ(skb, tail);
 
-	if (BPF_CORE_READ(skb, mac_len) == 0) {
+	u16 mac_header = BPF_CORE_READ(skb, mac_header);
+	u16 network_header = BPF_CORE_READ(skb, network_header);
+	*has_mac = BPF_CORE_READ(skb, dev, hard_header_len) && mac_header < network_header ? 1 : 0;
+	if (!*has_mac) {
 		void *data = skb_head + BPF_CORE_READ(skb, network_header);
 		return kprobe_pcap_filter_l3((void *)skb, (void *)skb, (void *)skb,
 					     data, data_end);
@@ -139,11 +142,11 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	if (!skb)
 		return BPF_OK;
 
-	if (!kprobe_pcap_filter(skb))
-		return BPF_OK;
-
 	struct event *event = bpf_map_lookup_elem(&event_stash, &ZERO);
 	if (!event)
+		return BPF_OK;
+
+	if (!kprobe_pcap_filter(skb, &event->has_mac))
 		return BPF_OK;
 
 	event->at = PT_REGS_IP(ctx);
@@ -151,7 +154,6 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	event->skb = (u64)skb;
 	event->skb_len = BPF_CORE_READ(skb, len);
 	event->protocol = BPF_CORE_READ(skb, protocol);
-	event->has_mac = BPF_CORE_READ(skb, dev, hard_header_len) ? 1 : 0;
 
 	u16 off_l2_or_l3 = event->has_mac
 		? BPF_CORE_READ(skb, mac_header)
