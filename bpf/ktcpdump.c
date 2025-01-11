@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 
 #include "vmlinux.h"
-#include "bpf/bpf_helpers.h"
-#include "bpf/bpf_tracing.h"
-#include "bpf/bpf_core_read.h"
+#include "bpf_helpers.h"
+#include "bpf_tracing.h"
+#include "bpf_core_read.h"
 
 #define MAX_STACK_DEPTH 50
 #define MAX_DATA_SIZE 9000
