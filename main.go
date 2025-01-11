@@ -321,9 +321,21 @@ func main() {
 			continue
 		}
 		skbData := make([]byte, event.DataLen)
+
+		retried := false
+	RETRY:
 		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &skbData); err != nil {
-			log.Debug("failed to parse ringbuf skbdata", "err", err)
-			continue
+			if !retried {
+				retried = true
+				time.Sleep(time.Millisecond)
+				goto RETRY
+			} else {
+				log.Warn("failed to parse ringbuf skbdata",
+					"skb", fmt.Sprintf("%x", event.Skb),
+					"data_len", event.DataLen,
+					"err", err)
+				continue
+			}
 		}
 
 		captureInfo := gopacket.CaptureInfo{
