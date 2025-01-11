@@ -1,0 +1,44 @@
+name: release-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+
+  release-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+
+      - name: Set up deps
+        run: |
+          sudo apt-get install -y gcc flex bison make autoconf libelf-dev
+          git submodule update --init --recursive
+          sudo make libpcap LIBPCAP_DIST_DIR=/usr/local CARCH=x86_64
+
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean --skip=publish -p 1
+
+      - name: Store Releases
+        uses: actions/upload-artifact@v4
+        with:
+          name: ktcpdump_v0.0.0-next_linux_amd64.tar.gz
+          path: dist/ktcpdump_v0.0.0-next_linux_amd64.tar.gz

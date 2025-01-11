@@ -1,0 +1,25 @@
+builds:
+  - id: ktcpdump-amd64
+    binary: ktcpdump
+    env:
+      - CGO_ENABLED=1
+      - CC=gcc
+    flags:
+      - -tags=static
+    ldflags:
+      - -linkmode 'external'
+      - -extldflags "-static"
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+archives:
+  - builds:
+      - ktcpdump-amd64
+
+release:
+  prerelease: auto
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
