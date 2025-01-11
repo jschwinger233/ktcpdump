@@ -25,6 +25,13 @@ jobs:
         env:
           GOPATH: ${{ env.HOME }}
 
+      - name: Set up deps
+        run: |
+          sudo apt-get install -y gcc flex bison make autoconf libelf-dev
+          git submodule update --init --recursive
+          sudo make libpcap LIBPCAP_DIST_DIR=/usr/local CARCH=x86_64
+
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
