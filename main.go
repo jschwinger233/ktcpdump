@@ -103,7 +103,7 @@ func main() {
 	}
 	defer k.Close()
 
-	var attachByLine bool
+	kdwarf, _ := GetKdwarf()
 	allInsns := map[string]map[uint64]*Instruction{}
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)
@@ -124,8 +124,9 @@ func main() {
 		var ok bool
 		var err error
 		var address uint64
+		var attachByInsn bool
 		if result["addr"] == "*" {
-			attachByLine = true
+			attachByInsn = true
 			delete(result, "addr")
 		}
 		if result["addr"] != "" {
@@ -159,7 +160,7 @@ func main() {
 		}
 		symbol = ksym.Name
 
-		if attachByLine {
+		if attachByInsn {
 			kcore, err := NewKcore()
 			if err != nil {
 				log.Error("Failed to new kcore", "err", err)
@@ -184,6 +185,19 @@ func main() {
 			}
 
 		} else {
+			insns, ok := allInsns[symbol]
+			if !ok {
+				allInsns[symbol] = map[uint64]*Instruction{}
+				insns = allInsns[symbol]
+			}
+			insns[offset] = &Instruction{
+				Symbol: symbol,
+				Offset: offset,
+			}
+			if kdwarf != nil {
+				insns[offset].LineInfo, _ = kdwarf.GetLineInfo(symbol, offset)
+			}
+
 			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
 			if err != nil {
 				log.Error("Failed to attach", "target", target, "err", err)
@@ -217,7 +231,6 @@ func main() {
 		}
 	}
 	for _, skbBuildFunc := range skbBuildFuncs {
-
 		ksym, err := KsymByName(skbBuildFunc)
 		if err != nil {
 			log.Error("Failed to find ksym", "symbol", skbBuildFunc, "err", err)
@@ -295,11 +308,11 @@ func main() {
 		ksym, _ := NearestKsym(event.At)
 
 		var insn *Instruction
-		if attachByLine {
-			var ok bool
-			insn, ok = allInsns[ksym.Name][event.At-ksym.Addr-1]
+		insns, ok := allInsns[ksym.Name]
+		if ok {
+			insn, ok = insns[event.At-ksym.Addr-1]
 			if !ok {
-				insn, ok = allInsns[ksym.Name][event.At-ksym.Addr-4]
+				insn, ok = insns[event.At-ksym.Addr-4]
 				if !ok {
 					log.Error("Failed to find insn", "symbol", ksym.Name, "offset", event.At-ksym.Addr)
 					return
@@ -308,17 +321,15 @@ func main() {
 		}
 
 		fmt.Printf("%-4d %-18x %-10d %-18x %-16s", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", ksym.Name, event.At-ksym.Addr))
-		if attachByLine {
-			if insn.LineInfo != nil {
-				fmt.Printf(" %s:%d", insn.Filename, insn.Line)
-			}
-			if insn.Call {
-				ksym, err := KsymByAddr(event.Call)
-				if event.Call != 0 && err == nil {
-					fmt.Printf(" // CALL %s", ksym.Name)
-				} else {
-					fmt.Printf(" // CALL %s", insn.CallTarget)
-				}
+		if insn.LineInfo != nil {
+			fmt.Printf(" %s:%d", insn.Filename, insn.Line)
+		}
+		if insn.Call {
+			ksym, err := KsymByAddr(event.Call)
+			if event.Call != 0 && err == nil {
+				fmt.Printf(" // CALL %s", ksym.Name)
+			} else {
+				fmt.Printf(" // CALL %s", insn.CallTarget)
 			}
 		}
 		fmt.Println()

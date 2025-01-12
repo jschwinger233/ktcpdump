@@ -3,6 +3,7 @@ package main
 import (
 	"debug/elf"
 	"fmt"
+	log "log/slog"
 	"os"
 	"sync"
 
@@ -59,7 +60,7 @@ func (k *Kcore) ParseInsns(symbol string) (insns map[uint64]*Instruction, err er
 	insns = make(map[uint64]*Instruction)
 	kdwarf, err := GetKdwarf()
 	if err != nil {
-		return
+		log.Debug("Failed to get kdwarf", "err", err)
 	}
 
 	ksym, err := KsymByName(symbol)
@@ -74,7 +75,8 @@ func (k *Kcore) ParseInsns(symbol string) (insns map[uint64]*Instruction, err er
 		if prog.Vaddr <= addr && prog.Vaddr+prog.Memsz >= addr {
 			bytes := make([]byte, leng)
 			if _, err = k.file.ReadAt(bytes, int64(prog.Off+addr-prog.Vaddr)); err != nil {
-				fmt.Println(err)
+				log.Debug("Failed to read kcore", "err", err)
+				continue
 			}
 			if len(bytes) == 0 {
 				continue
@@ -112,9 +114,8 @@ func (k *Kcore) ParseInsns(symbol string) (insns map[uint64]*Instruction, err er
 							break
 						}
 					}
-					lineInfo, err := kdwarf.GetLineInfo(symbol, uint64(off))
-					if err == nil {
-						insn.LineInfo = lineInfo
+					if kdwarf != nil {
+						insn.LineInfo, _ = kdwarf.GetLineInfo(symbol, uint64(off))
 					}
 					insns[uint64(off)] = &insn
 				}
