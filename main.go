@@ -131,6 +131,7 @@ func main() {
 			address, ok = IsDigit(result["addr"])
 			if !ok {
 				log.Error("Invalid address", "addr", result["addr"])
+				return
 			}
 		}
 
@@ -150,6 +151,12 @@ func main() {
 			symbol = result["sym"]
 			offset = address
 		}
+		ksym, err := KsymByName(symbol)
+		if err != nil {
+			log.Error("Failed to find ksym", "symbol", symbol, "err", err)
+			return
+		}
+		symbol = ksym.Name
 
 		if attachByLine {
 			kcore, err := NewKcore()
