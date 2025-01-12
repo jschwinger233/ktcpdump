@@ -104,6 +104,7 @@ func main() {
 	defer k.Close()
 
 	var attachByLine bool
+	allInsns := map[string]map[uint64]*Instruction{}
 	for _, target := range config.Targets {
 		match := targetPattern.FindStringSubmatch(target)
 		result := make(map[string]string)
@@ -164,23 +165,24 @@ func main() {
 				log.Error("Failed to new kcore", "err", err)
 				return
 			}
-			jumps, err := kcore.FindLines(symbol)
+			insns, err := kcore.ParseInsns(symbol)
 			if err != nil {
-				log.Error("Failed to find jumps", "symbol", symbol, "err", err)
+				log.Error("Failed to find lines", "symbol", symbol, "err", err)
 				return
 			}
-			for _, js := range jumps {
-				for _, j := range js {
-					log.Debug("Attaching", "symbol", symbol, "offset", j)
-					k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: j})
-					if err != nil {
-						log.Debug("Failed to attach targets", "symbol", symbol, "offset", j, "err", err)
-						continue
-					}
-					defer k.Close()
-					break
+			allInsns[symbol] = insns
+
+			for _, ins := range insns {
+				cookie := RegisterToCookie(ins.CallTarget)
+				log.Debug("Attaching", "symbol", ins.Symbol, "offset", ins.Offset, "cookie", cookie)
+				k, err := link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: ins.Offset, Cookie: cookie})
+				if err != nil {
+					log.Debug("Failed to attach targets", "symbol", symbol, "offset", ins.Offset, "err", err)
+					continue
 				}
+				defer k.Close()
 			}
+
 		} else {
 			k, err = link.Kprobe(symbol, objs.KprobeSkbBySearch, &link.KprobeOptions{Offset: offset})
 			if err != nil {
@@ -188,15 +190,6 @@ func main() {
 				return
 			}
 			defer k.Close()
-		}
-	}
-
-	var kdwarf *Kdwarf
-	if attachByLine {
-		kdwarf, err = GetKdwarf()
-		if err != nil {
-			log.Error("Failed to get kdwarf", "err", err)
-			return
 		}
 	}
 
@@ -275,11 +268,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("%-4s %-18s %-10s %-18s %-16s", "no", "skb", "skb->len", "pc", "ksym")
-	if attachByLine {
-		fmt.Printf(" addr2line")
-	}
-	fmt.Println()
+	fmt.Printf("%-4s %-18s %-10s %-18s %-16s\n", "no", "skb", "skb->len", "pc", "ksym")
 	i := 0
 
 	for {
@@ -303,19 +292,34 @@ func main() {
 			log.Error("Failed to get dwarf", "err", err)
 			return
 		}
-		sym, _ := NearestKsym(event.At)
+		ksym, _ := NearestKsym(event.At)
 
-		var lineInfo *LineInfo
+		var insn *Instruction
 		if attachByLine {
-			lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-1)
-			if err != nil {
-				lineInfo, err = kdwarf.GetLineInfo(sym.Name, event.At-sym.Addr-4)
+			var ok bool
+			insn, ok = allInsns[ksym.Name][event.At-ksym.Addr-1]
+			if !ok {
+				insn, ok = allInsns[ksym.Name][event.At-ksym.Addr-4]
+				if !ok {
+					log.Error("Failed to find insn", "symbol", ksym.Name, "offset", event.At-ksym.Addr)
+					return
+				}
 			}
 		}
 
-		fmt.Printf("%-4d %-18x %-10d %-18x %-16s", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", sym.Name, event.At-sym.Addr))
+		fmt.Printf("%-4d %-18x %-10d %-18x %-16s", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", ksym.Name, event.At-ksym.Addr))
 		if attachByLine {
-			fmt.Printf(" %s:%d", lineInfo.Filename, lineInfo.Line)
+			if insn.LineInfo != nil {
+				fmt.Printf(" %s:%d", insn.Filename, insn.Line)
+			}
+			if insn.Call {
+				ksym, err := KsymByAddr(event.Call)
+				if event.Call != 0 && err == nil {
+					fmt.Printf(" // CALL %s", ksym.Name)
+				} else {
+					fmt.Printf(" // CALL %s", insn.CallTarget)
+				}
+			}
 		}
 		fmt.Println()
 

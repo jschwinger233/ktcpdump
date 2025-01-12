@@ -18,6 +18,7 @@ type BpfEvent struct {
 	Skb      uint64
 	SkbLen   uint32
 	DataLen  uint32
+	Call     uint64
 	Protocol uint16
 	HasMac   uint8
 	_        [5]byte
