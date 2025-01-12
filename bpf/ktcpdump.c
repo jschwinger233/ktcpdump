@@ -19,6 +19,7 @@ struct event {
 	u64 skb;
 	u32 skb_len;
 	u32 data_len;
+	u64 call;
 	u16 protocol;
 	u8 has_mac;
 };
@@ -131,6 +132,60 @@ kprobe_pcap_filter(struct sk_buff *skb, u8 *has_mac)
 				     data, data_end);
 }
 
+static __always_inline void
+get_call_target(struct pt_regs *ctx, u64 *call, u64 cookie)
+{
+	switch (cookie) {
+	case 1:
+		BPF_CORE_READ_INTO(call, ctx, r15);
+		break;
+	case 2:
+		BPF_CORE_READ_INTO(call, ctx, r14);
+		break;
+	case 3:
+		BPF_CORE_READ_INTO(call, ctx, r13);
+		break;
+	case 4:
+		BPF_CORE_READ_INTO(call, ctx, r12);
+		break;
+	case 5:
+		BPF_CORE_READ_INTO(call, ctx, bp);
+		break;
+	case 6:
+		BPF_CORE_READ_INTO(call, ctx, bx);
+		break;
+	case 7:
+		BPF_CORE_READ_INTO(call, ctx, r11);
+		break;
+	case 8:
+		BPF_CORE_READ_INTO(call, ctx, r10);
+		break;
+	case 9:
+		BPF_CORE_READ_INTO(call, ctx, r9);
+		break;
+	case 10:
+		BPF_CORE_READ_INTO(call, ctx, r8);
+		break;
+	case 11:
+		BPF_CORE_READ_INTO(call, ctx, ax);
+		break;
+	case 12:
+		BPF_CORE_READ_INTO(call, ctx, cx);
+		break;
+	case 13:
+		BPF_CORE_READ_INTO(call, ctx, dx);
+		break;
+	case 14:
+		BPF_CORE_READ_INTO(call, ctx, si);
+		break;
+	case 15:
+		BPF_CORE_READ_INTO(call, ctx, di);
+		break;
+	default:
+		*call = 0;
+	}
+}
+
 SEC("kprobe/skb_by_search")
 int kprobe_skb_by_search(struct pt_regs *ctx)
 {
@@ -154,6 +209,7 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	event->skb = (u64)skb;
 	event->skb_len = BPF_CORE_READ(skb, len);
 	event->protocol = BPF_CORE_READ(skb, protocol);
+	get_call_target(ctx, &event->call, bpf_get_attach_cookie(ctx));
 
 	u16 off_l2_or_l3 = event->has_mac
 		? BPF_CORE_READ(skb, mac_header)

@@ -24,6 +24,14 @@ type Kcore struct {
 	elf  *elf.File
 }
 
+type Instruction struct {
+	Symbol     string
+	Offset     uint64
+	Call       bool
+	CallTarget string
+	*LineInfo
+}
+
 func NewKcore() (*Kcore, error) {
 	file, err := os.Open(kcorePath)
 	if err != nil {
@@ -47,9 +55,8 @@ func GetKcore() (_ *Kcore, err error) {
 	return kcore, err
 }
 
-func (k *Kcore) FindLines(symbol string) (lineInfos map[LineInfo][]uint64, err error) {
-	lineInfos = make(map[LineInfo][]uint64)
-
+func (k *Kcore) ParseInsns(symbol string) (insns map[uint64]*Instruction, err error) {
+	insns = make(map[uint64]*Instruction)
 	kdwarf, err := GetKdwarf()
 	if err != nil {
 		return
@@ -79,10 +86,37 @@ func (k *Kcore) FindLines(symbol string) (lineInfos map[LineInfo][]uint64, err e
 					inst = x86asm.Inst{Len: 1}
 					off += 1
 				} else {
+					insn := Instruction{
+						Symbol: symbol,
+						Offset: uint64(off),
+					}
+					if inst.Op == x86asm.CALL {
+						insn.Call = true
+						for _, arg := range inst.Args {
+							if arg == nil {
+								break
+							}
+							rel, ok := arg.(x86asm.Rel)
+							if !ok {
+								reg, ok := arg.(x86asm.Reg)
+								if ok {
+									insn.CallTarget = reg.String()
+									break
+								}
+							}
+							callee := addr + uint64(off) + uint64(rel) + uint64(inst.Len)
+							ksym, err := KsymByAddr(callee)
+							if err == nil {
+								insn.CallTarget = ksym.Name
+							}
+							break
+						}
+					}
 					lineInfo, err := kdwarf.GetLineInfo(symbol, uint64(off))
 					if err == nil {
-						lineInfos[*lineInfo] = append(lineInfos[*lineInfo], uint64(off))
+						insn.LineInfo = lineInfo
 					}
+					insns[uint64(off)] = &insn
 				}
 
 				bytes = bytes[inst.Len:]
@@ -91,7 +125,6 @@ func (k *Kcore) FindLines(symbol string) (lineInfos map[LineInfo][]uint64, err e
 					break
 				}
 			}
-
 		}
 	}
 
