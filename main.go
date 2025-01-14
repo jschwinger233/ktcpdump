@@ -281,7 +281,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("%-4s %-18s %-10s %-18s %-16s\n", "no", "skb", "skb->len", "pc", "ksym")
+	fmt.Printf("%-4s %-16s %-16s %-18s %-16s\n", "no", "skb", "skb->dev->name", "pc", "ksym")
 	i := 0
 
 	for {
@@ -320,7 +320,7 @@ func main() {
 			}
 		}
 
-		fmt.Printf("%-4d %-18x %-10d %-18x %-16s", i, event.Skb, event.SkbLen, event.At, fmt.Sprintf("%s+%d", ksym.Name, event.At-ksym.Addr))
+		fmt.Printf("%-4d %-16x %-16s %-18x %-16s", i, event.Skb, strings.TrimRight(string(event.Dev[:]), "\x00"), event.At, fmt.Sprintf("%s+%d", ksym.Name, event.At-ksym.Addr))
 		if insn.LineInfo != nil {
 			fmt.Printf(" %s:%d", insn.Filename, insn.Line)
 		}

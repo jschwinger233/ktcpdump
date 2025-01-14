@@ -17,11 +17,11 @@ struct event {
 	u64 at;
 	u64 ts;
 	u64 skb;
-	u32 skb_len;
-	u32 data_len;
 	u64 call;
+	u32 data_len;
 	u16 protocol;
 	u8 has_mac;
+	u8 dev[16];
 };
 
 struct {
@@ -207,8 +207,8 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	event->at = PT_REGS_IP(ctx);
 	event->ts = bpf_ktime_get_boot_ns();
 	event->skb = (u64)skb;
-	event->skb_len = BPF_CORE_READ(skb, len);
 	event->protocol = BPF_CORE_READ(skb, protocol);
+	BPF_CORE_READ_STR_INTO(&event->dev, skb, dev, name);
 	get_call_target(ctx, &event->call, bpf_get_attach_cookie(ctx));
 
 	u16 off_l2_or_l3 = event->has_mac
