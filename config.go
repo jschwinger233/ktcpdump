@@ -22,7 +22,7 @@ var config Config
 func init() {
 	var help bool
 	pflag.BoolVarP(&help, "help", "h", false, "")
-	pflag.StringSliceVarP(&config.Targets, "i", "i", []string{"ip_rcv", "dev_hard_start_xmit"}, "symbol|symbol+offset|address")
+	pflag.StringSliceVarP(&config.Targets, "i", "i", []string{"__netif_receive_skb_core", "__dev_queue_xmit"}, "symbol|symbol+offset|address")
 	pflag.StringVarP(&config.PcapFilename, "w", "w", "/tmp/a.pcap", "write packets to a file")
 	pflag.BoolVarP(&config.Verbose, "v", "v", false, "verbose output")
 	pflag.StringVarP(&config.DbgImagePath, "d", "d", "", "path to debug image")
