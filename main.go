@@ -92,7 +92,7 @@ func main() {
 			verifierLog = fmt.Sprintf("Verifier error: %+v\n", ve)
 		}
 
-		log.Error("Failed to load objects", "verifierLog", verifierLog, "err", err)
+		log.Error(verifierLog, "err", err)
 		return
 	}
 
@@ -281,6 +281,8 @@ func main() {
 		return
 	}
 
+	sizeofEvent := binary.Size(bpf.BpfEvent{})
+
 	fmt.Printf("%-4s %-16s %-16s %-18s %-16s\n", "no", "skb", "skb->dev->name", "pc", "ksym")
 	i := 0
 
@@ -334,30 +336,14 @@ func main() {
 		}
 		fmt.Println()
 
-		rec, err = eventsReader.Read()
-		if err != nil {
-			if errors.Is(err, ringbuf.ErrClosed) {
-				return
-			}
-			log.Debug("failed to read ringbuf", "err", err)
-			continue
-		}
 		skbData := make([]byte, event.DataLen)
 
-		retried := false
-	RETRY:
-		if err = binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &skbData); err != nil {
-			if !retried {
-				retried = true
-				time.Sleep(time.Millisecond)
-				goto RETRY
-			} else {
-				log.Warn("failed to parse ringbuf skbdata",
-					"skb", fmt.Sprintf("%x", event.Skb),
-					"data_len", event.DataLen,
-					"err", err)
-				continue
-			}
+		if err = binary.Read(bytes.NewBuffer(rec.RawSample[sizeofEvent:]), binary.LittleEndian, &skbData); err != nil {
+			log.Warn("failed to parse ringbuf skbdata",
+				"skb", fmt.Sprintf("%x", event.Skb),
+				"data_len", event.DataLen,
+				"err", err)
+			continue
 		}
 
 		captureInfo := gopacket.CaptureInfo{
