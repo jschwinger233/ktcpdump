@@ -24,12 +24,7 @@ struct event {
 	u8 dev[16];
 };
 
-struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__type(key, u32);
-	__type(value, struct event);
-	__uint(max_entries, 1);
-} event_stash SEC(".maps");
+const struct event *_ __attribute__((unused));
 
 struct skb_data {
 	u8 data[MAX_DATA_SIZE];
@@ -38,9 +33,9 @@ struct skb_data {
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__type(key, u32);
-	__type(value, struct skb_data);
+	__type(value, u8[MAX_DATA_SIZE + sizeof(struct event)]);
 	__uint(max_entries, 1);
-} skb_data_stash SEC(".maps");
+} ringbuf_data SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -53,11 +48,6 @@ struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1<<29);
 } event_ringbuf SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 1<<29);
-} skb_data_ringbuf SEC(".maps");
 
 #define is_skb_on_reg(r) \
 	reg = BPF_CORE_READ(ctx, r); \
@@ -113,7 +103,7 @@ kprobe_pcap_filter_l2(void *_skb, void *__skb, void *___skb, void *data, void* d
 }
 
 static __always_inline bool
-kprobe_pcap_filter(struct sk_buff *skb, u8 *has_mac)
+kprobe_pcap_filter(struct sk_buff *skb, u8 *has_mac, u16 *off_l2_or_l3)
 {
 	void *skb_head = BPF_CORE_READ(skb, head);
 	void *data_end = skb_head + BPF_CORE_READ(skb, tail);
@@ -121,6 +111,8 @@ kprobe_pcap_filter(struct sk_buff *skb, u8 *has_mac)
 	u16 mac_header = BPF_CORE_READ(skb, mac_header);
 	u16 network_header = BPF_CORE_READ(skb, network_header);
 	*has_mac = BPF_CORE_READ(skb, dev, hard_header_len) && mac_header < network_header ? 1 : 0;
+	*off_l2_or_l3 = *has_mac ? mac_header : network_header;
+
 	if (!*has_mac) {
 		void *data = skb_head + BPF_CORE_READ(skb, network_header);
 		return kprobe_pcap_filter_l3((void *)skb, (void *)skb, (void *)skb,
@@ -197,38 +189,39 @@ int kprobe_skb_by_search(struct pt_regs *ctx)
 	if (!skb)
 		return BPF_OK;
 
-	struct event *event = bpf_map_lookup_elem(&event_stash, &ZERO);
-	if (!event)
+	u8 has_mac;
+	u16 off_l2_or_l3;
+	if (!kprobe_pcap_filter(skb, &has_mac, &off_l2_or_l3))
 		return BPF_OK;
 
-	if (!kprobe_pcap_filter(skb, &event->has_mac))
+	void *ringbuf = bpf_map_lookup_elem(&ringbuf_data, &ZERO);
+	if (!ringbuf)
 		return BPF_OK;
+
+	struct event *event = (struct event *)ringbuf;
 
 	event->at = PT_REGS_IP(ctx);
 	event->ts = bpf_ktime_get_boot_ns();
 	event->skb = (u64)skb;
+	event->has_mac = has_mac;
 	event->protocol = BPF_CORE_READ(skb, protocol);
 	BPF_CORE_READ_STR_INTO(&event->dev, skb, dev, name);
 	get_call_target(ctx, &event->call, bpf_get_attach_cookie(ctx));
 
-	u16 off_l2_or_l3 = event->has_mac
-		? BPF_CORE_READ(skb, mac_header)
-		: BPF_CORE_READ(skb, network_header);
 	event->data_len = BPF_CORE_READ(skb, tail) - (u32)off_l2_or_l3;
-
-	void *skb_head = BPF_CORE_READ(skb, head);
-	u32 data_len = event->data_len > MAX_DATA_SIZE
+	event->data_len = event->data_len > MAX_DATA_SIZE
 		? MAX_DATA_SIZE
 		: event->data_len;
 
-	struct skb_data *skb_data = bpf_map_lookup_elem(&skb_data_stash, &ZERO);
-	if (!skb_data)
-		return BPF_OK;
+	u32 data_len = event->data_len;
+
+	struct skb_data *skb_data = (struct skb_data *)(event + 1);
+
+	void *skb_head = BPF_CORE_READ(skb, head);
 
 	bpf_probe_read_kernel(&skb_data->data, data_len, (void *)(skb_head + off_l2_or_l3));
+	bpf_ringbuf_output(&event_ringbuf, ringbuf, sizeof(*event) + data_len, 0);
 
-	bpf_ringbuf_output(&event_ringbuf, event, sizeof(*event), 0);
-	bpf_ringbuf_output(&event_ringbuf, &skb_data->data, data_len, 0);
 	return BPF_OK;
 }
 

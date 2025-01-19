@@ -24,8 +24,6 @@ type BpfEvent struct {
 	_        [1]byte
 }
 
-type BpfSkbData struct{ Data [9000]uint8 }
-
 // LoadBpf returns the embedded CollectionSpec for Bpf.
 func LoadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -76,11 +74,9 @@ type BpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
-	AliveSkbs      *ebpf.MapSpec `ebpf:"alive_skbs"`
-	EventRingbuf   *ebpf.MapSpec `ebpf:"event_ringbuf"`
-	EventStash     *ebpf.MapSpec `ebpf:"event_stash"`
-	SkbDataRingbuf *ebpf.MapSpec `ebpf:"skb_data_ringbuf"`
-	SkbDataStash   *ebpf.MapSpec `ebpf:"skb_data_stash"`
+	AliveSkbs    *ebpf.MapSpec `ebpf:"alive_skbs"`
+	EventRingbuf *ebpf.MapSpec `ebpf:"event_ringbuf"`
+	RingbufData  *ebpf.MapSpec `ebpf:"ringbuf_data"`
 }
 
 // BpfObjects contains all objects after they have been loaded into the kernel.
@@ -102,20 +98,16 @@ func (o *BpfObjects) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
-	AliveSkbs      *ebpf.Map `ebpf:"alive_skbs"`
-	EventRingbuf   *ebpf.Map `ebpf:"event_ringbuf"`
-	EventStash     *ebpf.Map `ebpf:"event_stash"`
-	SkbDataRingbuf *ebpf.Map `ebpf:"skb_data_ringbuf"`
-	SkbDataStash   *ebpf.Map `ebpf:"skb_data_stash"`
+	AliveSkbs    *ebpf.Map `ebpf:"alive_skbs"`
+	EventRingbuf *ebpf.Map `ebpf:"event_ringbuf"`
+	RingbufData  *ebpf.Map `ebpf:"ringbuf_data"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
 		m.AliveSkbs,
 		m.EventRingbuf,
-		m.EventStash,
-		m.SkbDataRingbuf,
-		m.SkbDataStash,
+		m.RingbufData,
 	)
 }
 
